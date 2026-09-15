@@ -1,0 +1,97 @@
+# 智法宝（law-wiz）— 忽略规则
+
+# --- 凭据与密钥 ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+credentials*
+.env
+.env.*
+.envrc
+.npmrc
+.pypirc
+# 模板必须入库：新成员 clone 后据此创建 .env，否则不知道要配哪些项
+!*.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+uv.lock.bak
+
+# --- 前端 ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+
+# --- 数据与运行时产物 ---
+data/
+uploads/
+storage/
+minio-data/
+chroma-data/
+mysql-data/
+redis-data/
+*.sqlite
+*.sqlite3
+*.db
+
+# --- 区块链与本地区块链节点 ---
+fisco/
+nodes/
+sdk/cert/
+ca/
+conf/ca.crt
+
+# --- 模型权重（体积大，不入库）---
+# ⚠️ 必须锚定根目录：写成不带斜杠的 `models/` 会连带忽略 backend/app/models/
+#    （ORM 模型），使克隆下来的仓库缺少整个数据层。锚定后仅忽略根目录的权重目录。
+/models/
+!backend/app/models/
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+
+# --- 编辑器与操作系统 ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 构建与临时输出 ---
+build/
+out/
+tmp/
+temp/
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# --- 文档导出产物（源文件是 Markdown，导出物不入库）---
+docs/export/

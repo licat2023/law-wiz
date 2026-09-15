@@ -1,0 +1,17 @@
+# pnpm 配置。
+#
+# ⚠️ pnpm 12 起**不再读取 `package.json` 的 `pnpm` 字段**，配置一律放本文件。
+# 写成 package.json 字段只会得到一条 "已忽略构建脚本" 的警告，
+# 不易联想到是配置位置的问题（实测踩过）。
+#
+# 为什么需要 allowBuilds：pnpm 默认**拦截依赖的构建脚本**（供应链安全考虑，
+# 防止安装期执行任意代码）。但有两个包确实需要在安装时编译或下载二进制：
+#
+#   - esbuild：下载平台专用的可执行文件。不跑 postinstall 则 Vite 无法构建。
+#   - vue-demi：postinstall 里按 Vue 版本切换适配层（Element Plus 依赖它）。
+#
+# **只放行这两个。** 不要用 `--dangerously-allow-all-builds` ——
+# 那等于对所有依赖开放安装期执行权限。
+allowBuilds:
+  esbuild: true
+  vue-demi: true

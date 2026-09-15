@@ -1,0 +1,47 @@
+# 统一行尾策略：文本文件一律以 LF 存入仓库，检出时由 Git 按平台转换。
+# 目的：避免 Windows 与 macOS/Linux 成员之间的整文件"伪改动"。
+# 注意：本文件不改变已有文件的仓库内表示，仅在后续提交中生效。
+
+* text=auto eol=lf
+
+# 明确按文本处理
+*.md      text eol=lf
+*.py      text eol=lf
+*.js      text eol=lf
+*.ts      text eol=lf
+*.vue     text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.sql     text eol=lf
+*.sh      text eol=lf
+*.toml    text eol=lf
+*.txt     text eol=lf
+*.sol     text eol=lf
+Dockerfile text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows 批处理必须保留 CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制文件：不做任何转换，且不参与 diff
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary
+*.docx    binary
+*.xlsx    binary
+*.pptx    binary
+*.zip     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.otf     binary
+
+# 语言统计：文档不计入代码行数
+docs/**   linguist-documentation
+*.md      linguist-documentation
