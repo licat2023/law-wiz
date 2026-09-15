@@ -1,0 +1,112 @@
+%% 智法宝（law-wiz）系统分层架构图
+%% 单一真源：修改本文件后重新渲染 fig-architecture.png / .svg
+%% 依据：03-概要设计.md §2.4、§2.5、§3.4 与 ADR-0010
+%% 渲染：见 docs/assets/README.md
+flowchart TB
+
+  subgraph L1["① 客户端（三端共用同一套 REST 接口，各自独立开发，不做 iOS）"]
+    U["Web 浏览器<br/><i>P1 主战场</i>"]
+    MP["微信小程序<br/><i>P5</i>"]
+    AND["安卓 App<br/><i>P6</i>"]
+  end
+
+  subgraph L2["② 前端应用层 · Vue 3 + Element Plus + Vite（P1）"]
+    FE["单页应用<br/>路由 · 状态管理 · Axios 请求封装"]
+    P1["合同审查页"]
+    P2["法律问答页"]
+    P3["个人中心"]
+    P4["合同管理"]
+    P5["印章管理"]
+    FE --- P1
+    FE --- P2
+    FE --- P3
+    FE --- P4
+    FE --- P5
+  end
+
+  subgraph L3["③ 接入层 · 1Panel OpenResty（复用，不另起 Nginx）"]
+    NG["反向代理 · HTTPS · 静态资源托管<br/>同源代理，不开启宽泛 CORS"]
+  end
+
+  subgraph L4["④ 业务服务层 · FastAPI（/api/v1）"]
+    API["RESTful API<br/>双令牌鉴权 · 参数校验 · 统一响应体"]
+    M1["M1 用户管理<br/><i>P1</i>"]
+    M2["M2 合同智能审查<br/><i>P1</i>"]
+    M3["M3 法律 AI 问答<br/><i>P1</i>"]
+    M4["M4 区块链证据存证<br/><i>P2</i>"]
+    M5["M5 个人中心<br/><i>P2 · 读取聚合层</i>"]
+    M6["M6 电子合同生成与签署<br/><i>P3</i>"]
+    M7["M7 电子印章与签名管理<br/><i>P3/P4</i>"]
+  end
+
+  subgraph L5["⑤ 外部能力接入 · 一期由切片直接接入，同一能力只在一处封装（ADR-0012）"]
+    LLM["大模型<br/>DeepSeek API"]
+    EMB["嵌入<br/>云端嵌入 API"]
+    OCRP["OCR<br/>云端 OCR API"]
+    VEC["向量存储<br/>Chroma（进程内）"]
+    FS["对象存储<br/>MinIO 内容寻址"]
+    SIGN["签章<br/>第三方签章服务 · P3"]
+    TSA["可信时间戳<br/>公共 TSA · P2"]
+    CHAIN["区块链<br/>FISCO BCOS 单节点 · P2"]
+  end
+
+  subgraph L6["⑥ 数据层"]
+    MYSQL[("MySQL 9.7<br/>结构化数据<br/>不含大对象与向量本体")]
+    CHROMADB[("Chroma<br/>语料向量<br/>进程内")]
+    MINIO[("MinIO<br/>合同 · 证据 · 印章 · 报告")]
+    REDIS[("Redis<br/>刷新令牌 · 限流<br/>数据可从 MySQL 重建")]
+  end
+
+  U --> FE
+  MP -.-> NG
+  AND -.-> NG
+  FE --> NG
+  NG --> API
+  API --> M1
+  API --> M2
+  API --> M3
+  API --> M4
+  API --> M5
+  API --> M6
+  API --> M7
+
+  M2 -.-> OCRP
+  M2 -.-> LLM
+  M2 -.-> VEC
+  M3 -.-> LLM
+  M3 -.-> VEC
+  M2 -.-> EMB
+  M3 -.-> EMB
+  M4 -.-> TSA
+  M4 -.-> CHAIN
+  M6 -.-> SIGN
+  M6 -.-> M4
+  M6 -.-> FS
+  M7 -.-> SIGN
+
+  M1 --> MYSQL
+  M1 --> REDIS
+  M2 --> MYSQL
+  M2 --> MINIO
+  M3 --> MYSQL
+  M4 --> MYSQL
+  M6 --> MYSQL
+  M6 --> MINIO
+  M7 --> MYSQL
+  M7 --> MINIO
+  VEC --> CHROMADB
+
+  classDef layer fill:#f5f5f5,stroke:#999,stroke-width:1px
+  classDef p1 fill:#d9edf7,stroke:#31708f,stroke-width:2px
+  classDef later fill:#f2f2f2,stroke:#bbb,stroke-dasharray:4 3
+  classDef abst fill:#e8f5e9,stroke:#2e7d32
+  classDef store fill:#fff8e1,stroke:#b8860b
+  classDef edge fill:#ffffff,stroke:#666
+
+  class U edge
+  class MP,AND later
+  class API p1
+  class M1,M2,M3 p1
+  class M4,M5,M6,M7 later
+  class LLM,EMB,OCRP,VEC,FS,SIGN,TSA,CHAIN abst
+  class MYSQL,CHROMADB,MINIO,REDIS store
