@@ -78,6 +78,12 @@ def save_upload(
         select(FileObject).where(FileObject.sha256 == digest, FileObject.deleted_at.is_(None))
     )
     if existing is not None:
+        # **自愈**：数据库有记录、对象存储却没有内容时把内容补回去。
+        # 否则一旦两边不一致（人为清理、迁移未同步、对象存储丢数据），
+        # 该内容会**永远**无法恢复 —— 因为去重路径会一直跳过写盘。
+        storage = get_storage()
+        if not storage.exists(existing.object_key):
+            storage.put(existing.object_key, data)
         return _to_upload_data(existing, is_duplicate=True)
 
     storage = get_storage()

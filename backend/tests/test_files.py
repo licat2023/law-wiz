@@ -111,6 +111,30 @@ def test_upload_is_content_addressed(
     assert _temp_storage.exists(object_key_for(first["sha256"]))
 
 
+def test_duplicate_upload_self_heals_missing_content(
+    client: TestClient, auth_headers: dict[str, str], _temp_storage: Any
+) -> None:
+    """数据库有记录、对象存储却丢了内容时，重复上传应把内容**补回去**。
+
+    ⚠️ 若不自愈，这份内容将**永远**无法恢复 —— 去重路径会一直跳过写盘。
+    这不是假想场景：人为清理、迁移未同步、对象存储丢数据都会造成两边不一致。
+    """
+    pdf = build_pdf("Self Healing Content")
+    first = _upload(client, pdf, "a.pdf", auth_headers).json()["data"]
+
+    from app.infra.storage import object_key_for
+
+    key = object_key_for(first["sha256"])
+    (_temp_storage._root / key).unlink()  # 模拟对象存储丢内容
+    assert not _temp_storage.exists(key)
+
+    second = _upload(client, pdf, "b.pdf", auth_headers).json()["data"]
+
+    assert second["is_duplicate"] is True
+    assert second["file_id"] == first["file_id"]
+    assert _temp_storage.exists(key), "重复上传应把丢失的内容补回来"
+
+
 def test_upload_rejects_extension_lie(client: TestClient, auth_headers: dict[str, str]) -> None:
     """扩展名与 Content-Type 都伪装成 PDF，但内容是纯文本 —— 必须拒绝。
 

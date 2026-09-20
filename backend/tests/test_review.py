@@ -248,6 +248,30 @@ def test_result_of_failed_task_is_40907(e2e_client, sample_pdf) -> None:
     assert resp.json()["code"] == int(ErrorCode.REVIEW_FAILED)
 
 
+def test_missing_file_content_fails_with_actionable_message(e2e_client, sample_pdf, _temp_storage) -> None:
+    """数据库有记录、对象存储缺内容时，失败信息必须**可操作**。
+
+    这不是假想场景：人为清理、迁移未同步、对象存储丢数据都会造成两边不一致。
+    任务仍应优雅失败，而不是抛 500；且要告诉用户**该做什么**。
+    """
+    import shutil
+
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    shutil.rmtree(_temp_storage._root, ignore_errors=True)  # 模拟对象存储丢内容
+
+    created = _create_review(e2e_client, headers, file_id)
+    assert created.status_code == 202
+    task_id = created.json()["data"]["task_id"]
+
+    task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == str(int(ErrorCode.FILE_NOT_FOUND))
+    assert "重新上传" in task["error_message"], "失败信息应包含可操作的指引"
+
+
 # ============================================================
 # 越权与不存在
 # ============================================================

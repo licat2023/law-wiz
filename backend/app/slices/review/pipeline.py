@@ -149,7 +149,15 @@ def _stage_ocr(db: Session, task: ReviewTask, ctx: _Context) -> None:
     if file_object is None:
         raise BusinessError(ErrorCode.FILE_NOT_FOUND, "合同文件不存在或已被删除")
 
-    data = get_storage().get(file_object.object_key)
+    try:
+        data = get_storage().get(file_object.object_key)
+    except BusinessError as exc:
+        # 数据库有记录、对象存储却没有内容 —— 说明两边不一致（人为清理、迁移
+        # 未同步、对象存储丢数据等）。给出**可操作**的指引，而不是只说"不存在"。
+        raise BusinessError(
+            ErrorCode.FILE_NOT_FOUND,
+            "合同文件内容已不存在（数据库记录与对象存储不一致），请重新上传该文件后再发起审查",
+        ) from exc
     fmt = detect_format(data)
     if fmt is None:
         raise BusinessError(ErrorCode.UNSUPPORTED_FILE_TYPE, "文件格式无法识别，无法提取文本")
