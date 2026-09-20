@@ -43,6 +43,11 @@ def _validate_startup_config() -> None:
             problems.append("生产环境必须通过 LAWWIZ_JWT_SECRET 提供独立的令牌密钥。")
         if _settings.debug:
             problems.append("生产环境不应开启 debug。")
+        if _settings.llm_provider == "fake":
+            problems.append(
+                "生产环境禁止使用 fake 的 LLM 提供方：它会产出**写死的假风险结论**，"
+                "比「暂时不可用」危险得多。请改为 deepseek / ollama，或退回 stub。"
+            )
 
     if _settings.storage_backend == "minio" and not _settings.minio_access_key:
         problems.append("storage_backend=minio 但未配置 minio_access_key。")

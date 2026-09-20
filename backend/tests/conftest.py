@@ -103,6 +103,25 @@ def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
 
 
 @pytest.fixture(autouse=True)
+def _baseline_settings(monkeypatch) -> None:
+    """把与外部能力相关的配置钉在**测试基线**上。
+
+    ⚠️ **必须这么做**：`get_settings()` 会读取**开发者本机的 `.env`**。
+    若本机为了演示把 `llm_provider` 设成 `fake`（返回写死的假结论），
+    测试结果就会随机器而变 —— **"同一份代码在不同机器上结论不同"是测试
+    不能接受的属性**，也违背 AGENTS.md 的"验证必须针对全新 clone"。
+
+    需要非基线取值的用例自行用 monkeypatch 覆盖（见 `test_infra_ai.py`）。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "stub")
+    monkeypatch.setattr(settings, "ocr_provider", "stub")
+    monkeypatch.setattr(settings, "vector_backend", "memory")
+
+
+@pytest.fixture(autouse=True)
 def _memory_idempotency_store(monkeypatch) -> Generator[dict[str, dict]]:
     """幂等缓存的进程内替身。
 

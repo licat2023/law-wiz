@@ -86,7 +86,10 @@ class Settings(BaseSettings):
     ocr_api_base: str = ""
     ocr_api_key: str = ""
 
-    llm_provider: Literal["stub", "deepseek", "ollama"] = "stub"
+    # `fake` 返回确定性的占位结论，**仅供开发与演示** —— 它让整条审查/问答链路
+    # 在不接真实模型、不需要 API key 的情况下可以完整跑通。
+    # 生产环境由启动期校验强制禁用（见 main.py），因为它会产出**假的风险结论**。
+    llm_provider: Literal["stub", "fake", "deepseek", "ollama"] = "stub"
     llm_api_base: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
