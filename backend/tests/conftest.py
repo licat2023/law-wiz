@@ -103,6 +103,26 @@ def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
 
 
 @pytest.fixture(autouse=True)
+def _memory_idempotency_store(monkeypatch) -> Generator[dict[str, dict]]:
+    """幂等缓存的进程内替身。
+
+    ⚠️ **必须替换**：真实实现写 Redis，且 TTL 24 小时。若不替换，
+    **测试之间会互相污染** —— 前一个用例缓存的 `task_id` 属于它自己那个
+    已被丢弃的内存库；后一个用例若用了同一个 key，就会拿到一个
+    "任务创建成功、随即却查不到"的诡异响应。
+
+    症状具有误导性：单跑通过、连着跑失败，看起来像并发或事务问题。
+    """
+    store: dict[str, dict] = {}
+
+    from app.core import idempotency
+
+    monkeypatch.setattr(idempotency, "load", lambda key: store.get(key))
+    monkeypatch.setattr(idempotency, "save", lambda key, payload: store.update({key: payload}))
+    yield store
+
+
+@pytest.fixture(autouse=True)
 def _temp_storage(tmp_path, monkeypatch):
     """把文件存储指向临时目录，避免测试污染项目的 `.data/`。"""
     from app.infra import storage as storage_module
@@ -139,3 +159,75 @@ def registered_user(client: TestClient) -> dict[str, str]:
     )
     assert resp.status_code == 200, resp.text
     return resp.json()["data"]
+
+
+@pytest.fixture
+def sample_pdf() -> bytes:
+    """一份结构完整的 PDF 合同，供上传与审查用例使用。"""
+    text = "Purchase Contract. Party B shall deliver goods within 30 days."
+    content = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(content)).encode() + b">>\nstream\n" + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref_pos = len(out)
+    size = len(objects) + 1
+    out += f"xref\n0 {size}\n".encode() + b"0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+@pytest.fixture
+def e2e_client(monkeypatch, _temp_storage):
+    """**允许真实提交**的端到端环境，用于审查流水线。
+
+    ⚠️ 与 `client` 夹具的区别在于隔离方式：
+    - `client` 用「事务 + 用例结束回滚」保证隔离，因此**不能承受 commit**；
+    - 审查流水线必须分阶段 commit（否则轮询看不到进度），所以这里改成
+      「**每个用例一个全新的内存库 + 真实提交**」，并在结束时丢弃整个库。
+
+    同时把流水线的会话工厂与存储指向同一套测试资源 —— 流水线运行在请求之外，
+    用的是它自己创建的会话与存储引用。
+    """
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    import app.models
+
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    from app.slices.review import pipeline as review_pipeline
+
+    app = create_app()
+
+    def _override_get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
+    monkeypatch.setattr(review_pipeline, "SessionLocal", factory)
+    # 流水线是具名导入，持有自己的 get_storage 引用，需单独替换
+    monkeypatch.setattr(review_pipeline, "get_storage", lambda: _temp_storage)
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+    engine.dispose()

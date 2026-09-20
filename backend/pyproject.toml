@@ -11,29 +11,24 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.12",
-
     # --- 数据库 ---
     "sqlalchemy>=2.0.36",
     "alembic>=1.14",
     "pymysql>=1.1.1",
-
     # --- 缓存与令牌（刷新令牌、限流计数）---
     "redis>=5.2",
-
     # --- 认证与密码学 ---
     "pyjwt>=2.10",
     "bcrypt>=4.2",
     "cryptography>=44.0",
-
     # --- 文件处理（一期仅文本型文件解析，不做本地 OCR）---
     "pypdf>=5.1",
     "python-docx>=1.1",
-
     # --- 外部能力调用 ---
     "httpx>=0.28",
-
     # --- 图像处理（P3 印章合成需要；一期仅作依赖占位）---
     "pillow>=11.0",
+    "reportlab>=5.0.1",
 ]
 
 [project.optional-dependencies]

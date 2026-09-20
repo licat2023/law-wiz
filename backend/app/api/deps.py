@@ -9,13 +9,18 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.errors import BusinessError, ErrorCode
 
 # 每个请求的追踪号：与响应体 request_id 及后端日志关联（05-接口设计 §3.2）
 REQUEST_ID_HEADER = "X-Request-ID"
+
+# 幂等键。必须携带该头的接口见 05-接口设计 §3.5：
+# `POST /reviews`（发起审查）、`POST /qa/sessions/{id}/messages`（发消息）。
+IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+_IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
 
 def get_request_id(request: Request) -> str:
@@ -87,3 +92,21 @@ def get_current_user_id(token: BearerToken) -> int:
 
 
 CurrentUserId = Annotated[int, Depends(get_current_user_id)]
+
+
+def get_idempotency_key(
+    value: Annotated[str | None, Header(alias=IDEMPOTENCY_KEY_HEADER)] = None,
+) -> str:
+    """取幂等键。**必填** —— 缺失即 40001（05-接口设计 §3.5）。
+
+    限制长度与字符集：该值会被写进 Redis 键，放任任意内容会污染键空间。
+    """
+    if value is None or not value.strip():
+        raise BusinessError(ErrorCode.PARAM_INVALID, f"缺少 {IDEMPOTENCY_KEY_HEADER} 请求头")
+    key = value.strip()
+    if len(key) > _IDEMPOTENCY_KEY_MAX_LENGTH or not key.isascii():
+        raise BusinessError(ErrorCode.PARAM_INVALID, f"{IDEMPOTENCY_KEY_HEADER} 格式不合法")
+    return key
+
+
+IdempotencyKey = Annotated[str, Depends(get_idempotency_key)]

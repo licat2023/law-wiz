@@ -1,0 +1,407 @@
+"""审查切片测试（M2 的 C 组）—— C-01 ~ C-06。
+
+⚠️ 用 `e2e_client` 而非 `client`：审查是**异步且分阶段提交**的，
+必须在「允许真实提交」的环境里跑，否则流水线的进度写不进库、
+轮询读不到，测试会得到与生产不一致的结论。
+
+⚠️ AI 能力用两种方式对待：
+- **默认（stub）**：验证"AI 未接入时任务优雅失败"这条真实路径；
+- **替代品（monkeypatch）**：验证"AI 可用时的完整成功链路"。
+
+这正是文档里"能力可降级"给开发带来的好处 —— 不必等真实 AI 就能测通全流程。
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.core.errors import ErrorCode
+from app.infra import llm as llm_module
+
+REVIEWS = "/api/v1/reviews"
+
+
+def _auth_headers(client: TestClient, phone: str = "13800000021") -> dict[str, str]:
+    client.post(
+        "/api/v1/auth/register",
+        json={"phone": phone, "password": "abc12345", "verify_code": "000000"},
+    )
+    resp = client.post("/api/v1/auth/login", json={"account": phone, "password": "abc12345"})
+    return {"Authorization": f"Bearer {resp.json()['data']['access_token']}"}
+
+
+def _upload(client: TestClient, headers: dict[str, str], pdf: bytes) -> str:
+    resp = client.post(
+        "/api/v1/files",
+        files={"file": ("采购合同.pdf", pdf, "application/pdf")},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["data"]["file_id"]
+
+
+def _create_review(client: TestClient, headers: dict[str, str], file_id: str, **kwargs):
+    key = kwargs.pop("key", "idem-key-1")
+    return client.post(
+        REVIEWS,
+        json={"file_id": file_id, **kwargs},
+        headers={**headers, "Idempotency-Key": key},
+    )
+
+
+def _fake_llm(system: str, user: str, schema: dict) -> dict:
+    """替代品：按调用的 schema 形状返回不同结果。"""
+    if "risk_points" in schema.get("properties", {}):
+        return {
+            "risk_points": [
+                {
+                    "risk_level": "high",
+                    "risk_category": "legal",
+                    "clause_title": "第八条 违约责任",
+                    "clause_text": "违约金按合同总额的 30% 计算。",
+                    "char_start": 10,
+                    "char_end": 30,
+                    "description": "违约金比例过高，可能被法院调减。",
+                    "suggestion": "建议调整为合同总额的 10%–20%。",
+                    "legal_basis": "《中华人民共和国民法典》第五百八十五条",
+                    "source_type": "retrieved_law",
+                    "confidence": 0.86,
+                },
+                {
+                    "risk_level": "medium",
+                    "description": "付款条件与验收标准未约定明确。",
+                    # ⚠️ 故意给一个**非法**来源，用于验证规范化逻辑
+                    "source_type": "我就这么认为",
+                },
+            ]
+        }
+    return {
+        "parties": ["甲方：甲公司", "乙方：乙公司"],
+        "amount": "人民币 120 万元",
+        "liability": "违约金按合同总额的 30% 计算",
+    }
+
+
+# ============================================================
+# C-01 发起审查
+# ============================================================
+
+
+def test_create_review_requires_idempotency_key(e2e_client, sample_pdf) -> None:
+    """§3.5 规定该头**必填**，缺失即 40001。"""
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    resp = e2e_client.post(REVIEWS, json={"file_id": file_id}, headers=headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)
+
+
+def test_review_returns_202_with_task_id(e2e_client, sample_pdf, monkeypatch) -> None:
+    """接口**立即返回**任务号，不在请求内完成审查（03-概要设计 §5.1）。"""
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    resp = _create_review(e2e_client, headers, file_id)
+
+    assert resp.status_code == 202
+    data = resp.json()["data"]
+    assert isinstance(data["task_id"], str)
+    assert data["status"] == "pending"
+    assert data["progress"] == 0
+
+
+def test_idempotency_key_returns_the_same_task(e2e_client, sample_pdf, monkeypatch) -> None:
+    """同一 key 重复提交返回首次结果，而不是再建一个任务。
+
+    注意与 `40905` 的区别：这里**不靠**"同文件正在审查"的兜底，
+    靠的是幂等缓存本身 —— 两者是独立的防线。
+    """
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    first = _create_review(e2e_client, headers, file_id, key="same-key")
+    second = _create_review(e2e_client, headers, file_id, key="same-key")
+
+    assert first.status_code == 202 and second.status_code == 202
+    assert first.json()["data"]["task_id"] == second.json()["data"]["task_id"]
+
+
+def test_duplicate_review_of_same_file_is_40905(e2e_client, sample_pdf, monkeypatch) -> None:
+    """默认拒绝同一文件的并发审查；`force=true` 才允许。"""
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    assert _create_review(e2e_client, headers, file_id, key="k1").status_code == 202
+
+    duplicate = _create_review(e2e_client, headers, file_id, key="k2")
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == int(ErrorCode.REVIEW_IN_PROGRESS)
+
+    forced = _create_review(e2e_client, headers, file_id, key="k3", force=True)
+    assert forced.status_code == 202
+
+
+# ============================================================
+# 流水线：AI 未接入 / AI 可用
+# ============================================================
+
+
+def test_review_fails_gracefully_when_llm_not_configured(e2e_client, sample_pdf) -> None:
+    """**AI 未接入时任务优雅失败** —— 不是卡住、不是 5xx，而是可解释的失败状态。
+
+    这条路径现在就能测，正是"能力可降级"设计的意义：不必等真实 AI 落地，
+    就能确认失败会被正确记录并可通过 C-02 看到。
+    """
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    created = _create_review(e2e_client, headers, file_id)
+    assert created.status_code == 202
+    task_id = created.json()["data"]["task_id"]
+
+    # TestClient 会在响应返回后同步执行后台任务，因此此刻任务已结束
+    task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == str(int(ErrorCode.LLM_UNAVAILABLE))
+    assert task["error_message"], "失败必须带面向用户的说明"
+    assert task["finished_at"]
+
+
+def test_full_flow_with_fake_llm(e2e_client, sample_pdf, monkeypatch) -> None:
+    """AI 可用时的完整链路：上传 → 审查 → 结果 → 报告。"""
+    monkeypatch.setattr(llm_module, "complete_structured", _fake_llm)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    created = _create_review(e2e_client, headers, file_id)
+    task_id = created.json()["data"]["task_id"]
+
+    task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+    assert task["status"] == "succeeded"
+    assert task["progress"] == 100
+    assert task["stage"] is None
+    assert task["error_code"] is None
+
+    # --- C-03 结果 ---
+    result = e2e_client.get(f"{REVIEWS}/{task_id}/result", headers=headers).json()["data"]
+    assert result["counts"] == {"high": 1, "medium": 1, "low": 0}
+    assert result["extracted_terms"]["amount"] == "人民币 120 万元"
+    assert result["contract_title"] == "采购合同.pdf"
+    assert len(result["risk_points"]) == 2
+
+    high = result["risk_points"][0]
+    assert high["risk_level"] == "high"
+    assert high["source_type"] == "retrieved_law"
+    assert high["char_start"] == 10
+
+    # ⚠️ 非法 source_type 必须降级为 llm_inference —— 绝不能把推断冒充成法条
+    assert result["risk_points"][1]["source_type"] == "llm_inference"
+
+    # --- C-04 报告 ---
+    report = e2e_client.get(f"{REVIEWS}/{task_id}/report", headers=headers)
+    assert report.status_code == 200
+    assert report.headers["content-type"] == "application/pdf"
+    assert report.content.startswith(b"%PDF-"), "报告必须是合法 PDF"
+    assert "filename*=UTF-8''" in report.headers["content-disposition"], "中文文件名需 RFC 5987 编码"
+
+
+# ============================================================
+# C-02 / C-03 的状态门槛
+# ============================================================
+
+
+def test_result_before_finish_is_40906(e2e_client, sample_pdf, monkeypatch) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    resp = e2e_client.get(f"{REVIEWS}/{task_id}/result", headers=headers)
+
+    assert resp.status_code == 409
+    assert resp.json()["code"] == int(ErrorCode.REVIEW_NOT_FINISHED)
+
+
+def test_result_of_failed_task_is_40907(e2e_client, sample_pdf) -> None:
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    resp = e2e_client.get(f"{REVIEWS}/{task_id}/result", headers=headers)
+
+    assert resp.status_code == 409
+    assert resp.json()["code"] == int(ErrorCode.REVIEW_FAILED)
+
+
+# ============================================================
+# 越权与不存在
+# ============================================================
+
+
+def test_other_user_cannot_read_task(e2e_client, sample_pdf, monkeypatch) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    owner = _auth_headers(e2e_client, phone="13800000021")
+    file_id = _upload(e2e_client, owner, sample_pdf)
+    task_id = _create_review(e2e_client, owner, file_id).json()["data"]["task_id"]
+
+    intruder = _auth_headers(e2e_client, phone="13800000022")
+    resp = e2e_client.get(f"{REVIEWS}/{task_id}", headers=intruder)
+
+    assert resp.status_code == 403
+    assert resp.json()["code"] == int(ErrorCode.FORBIDDEN)
+
+
+def test_missing_task_is_40401(e2e_client) -> None:
+    headers = _auth_headers(e2e_client)
+
+    resp = e2e_client.get(f"{REVIEWS}/99999999", headers=headers)
+
+    assert resp.status_code == 404
+    assert resp.json()["code"] == int(ErrorCode.REVIEW_NOT_FOUND)
+
+
+def test_create_review_rejects_unknown_file(e2e_client) -> None:
+    headers = _auth_headers(e2e_client)
+
+    resp = _create_review(e2e_client, headers, "99999999")
+
+    assert resp.status_code == 404
+    assert resp.json()["code"] == int(ErrorCode.FILE_NOT_FOUND)
+
+
+def test_create_review_rejects_other_users_file(e2e_client, sample_pdf, monkeypatch) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    owner = _auth_headers(e2e_client, phone="13800000021")
+    file_id = _upload(e2e_client, owner, sample_pdf)
+
+    intruder = _auth_headers(e2e_client, phone="13800000022")
+    resp = _create_review(e2e_client, intruder, file_id)
+
+    assert resp.status_code == 403
+    assert resp.json()["code"] == int(ErrorCode.FORBIDDEN)
+
+
+# ============================================================
+# C-05 历史列表
+# ============================================================
+
+
+def test_list_reviews_paginates_and_filters(e2e_client, sample_pdf, monkeypatch) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    for index in range(3):
+        _create_review(e2e_client, headers, file_id, key=f"list-{index}", force=True)
+
+    page = e2e_client.get(f"{REVIEWS}?page=1&page_size=2", headers=headers).json()["data"]
+    assert page["total"] == 3
+    assert len(page["items"]) == 2
+    assert page["page"] == 1 and page["page_size"] == 2
+
+    pending = e2e_client.get(f"{REVIEWS}?status=pending", headers=headers).json()["data"]
+    assert pending["total"] == 3
+
+    finished = e2e_client.get(f"{REVIEWS}?status=succeeded", headers=headers).json()["data"]
+    assert finished["total"] == 0
+
+
+def test_list_reviews_rejects_bad_pagination(e2e_client) -> None:
+    headers = _auth_headers(e2e_client)
+
+    resp = e2e_client.get(f"{REVIEWS}?page_size=9999", headers=headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PAGE_OUT_OF_RANGE)
+
+
+def test_list_reviews_rejects_bad_sort(e2e_client) -> None:
+    headers = _auth_headers(e2e_client)
+
+    resp = e2e_client.get(f"{REVIEWS}?sort=drop-table", headers=headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)
+
+
+# ============================================================
+# C-06 标记误报
+# ============================================================
+
+
+def test_dismiss_risk_point(e2e_client, sample_pdf, monkeypatch) -> None:
+    """**这是收集模型误报样本的唯一途径**，必须可用（04-数据库设计 §5.7）。"""
+    monkeypatch.setattr(llm_module, "complete_structured", _fake_llm)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    result = e2e_client.get(f"{REVIEWS}/{task_id}/result", headers=headers).json()["data"]
+    point_id = result["risk_points"][0]["id"]
+    assert result["risk_points"][0]["is_dismissed"] is False
+
+    resp = e2e_client.patch(
+        f"{REVIEWS}/{task_id}/risk-points/{point_id}",
+        json={"is_dismissed": True},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["is_dismissed"] is True
+
+    refreshed = e2e_client.get(f"{REVIEWS}/{task_id}/result", headers=headers).json()["data"]
+    assert refreshed["risk_points"][0]["is_dismissed"] is True
+
+
+def test_dismiss_rejects_point_of_other_task(e2e_client, sample_pdf, monkeypatch) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    resp = e2e_client.patch(
+        f"{REVIEWS}/{task_id}/risk-points/99999999",
+        json={"is_dismissed": True},
+        headers=headers,
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["code"] == int(ErrorCode.REVIEW_NOT_FOUND)
+
+
+@pytest.mark.parametrize("body", [{}, {"is_dismissed": "not-a-bool"}])
+def test_dismiss_validates_body(e2e_client, sample_pdf, monkeypatch, body) -> None:
+    from app.slices.review import service
+
+    monkeypatch.setattr(service, "enqueue", lambda task_id: None)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    resp = e2e_client.patch(f"{REVIEWS}/{task_id}/risk-points/1", json=body, headers=headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)

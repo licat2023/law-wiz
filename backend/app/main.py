@@ -63,13 +63,14 @@ def register_routers(app: FastAPI) -> None:
     from app.slices.auth import router as auth_router
     from app.slices.files import router as files_router
     from app.slices.health import router as health_router
+    from app.slices.review import router as review_router
 
     app.include_router(health_router, prefix=_settings.api_prefix)
     app.include_router(auth_router, prefix=_settings.api_prefix)
     app.include_router(files_router, prefix=_settings.api_prefix)
+    app.include_router(review_router, prefix=_settings.api_prefix)
 
     # --- 以下切片已规划但尚未实现，见 app/slices/README.md ---
-    # from app.slices.review import router as review_router        # B：M2 合同审查
     # from app.slices.knowledge import router as knowledge_router  # C：M3 知识库
     # from app.slices.qa import router as qa_router                # C：M3 法律问答
 

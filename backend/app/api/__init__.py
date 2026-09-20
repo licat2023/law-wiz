@@ -8,9 +8,11 @@ from __future__ import annotations
 from app.api.deps import (
     BearerToken,
     CurrentUserId,
+    IdempotencyKey,
     RequestId,
     get_bearer_token,
     get_current_user_id,
+    get_idempotency_key,
     get_request_id,
 )
 from app.infra.db.session import get_db
@@ -18,9 +20,11 @@ from app.infra.db.session import get_db
 __all__ = [
     "BearerToken",
     "CurrentUserId",
+    "IdempotencyKey",
     "RequestId",
     "get_bearer_token",
     "get_current_user_id",
     "get_db",
+    "get_idempotency_key",
     "get_request_id",
 ]
