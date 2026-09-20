@@ -44,6 +44,9 @@ yarn-error.log*
 
 # --- 数据与运行时产物 ---
 data/
+# 后端本地存储根目录（LAWWIZ_STORAGE_LOCAL_ROOT 默认值）与 Chroma 持久化目录。
+# 注意：`data/` 匹配的是名为 data 的目录，**不会**匹配 `.data` —— 必须单独列出。
+.data/
 uploads/
 storage/
 minio-data/
