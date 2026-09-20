@@ -1,7 +1,8 @@
 """全部 ORM 模型。
 
 ⚠️ 本模块**必须导入所有模型**：Alembic 的 `--autogenerate` 依赖
-`Base.metadata` 中已注册的表，漏导入任何一张表都会导致迁移脚本缺表。
+`Base.metadata` 中已注册的表，漏导入任何一张表都会导致迁移脚本缺表，
+且要到建库时才发现。
 
 新增切片的负责人各自在此登记自己的模型（见 `app/slices/README.md` 步骤 2）。
 """
@@ -11,6 +12,9 @@ from __future__ import annotations
 from app.infra.db.base import Base
 from app.models.contract import Contract, ContractVersion
 from app.models.file import FileObject
+from app.models.knowledge import KbChunk, KbDocument, RiskRule, RiskRuleSource
+from app.models.qa import QaCitation, QaMessage, QaSession
+from app.models.review import ReviewReport, ReviewTask, RiskPoint
 from app.models.user import User, UserProfile
 
 __all__ = [
@@ -18,6 +22,16 @@ __all__ = [
     "Contract",
     "ContractVersion",
     "FileObject",
+    "KbChunk",
+    "KbDocument",
+    "QaCitation",
+    "QaMessage",
+    "QaSession",
+    "ReviewReport",
+    "ReviewTask",
+    "RiskPoint",
+    "RiskRule",
+    "RiskRuleSource",
     "User",
     "UserProfile",
 ]
