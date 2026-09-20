@@ -63,7 +63,10 @@ class Settings(BaseSettings):
 
     # ---------- 文件存储（内容寻址）----------
     storage_backend: Literal["local", "minio"] = "local"
-    storage_local_root: str = "./.data/files"
+    # ⚠️ 这是**根目录**，不是"文件目录"：实际路径 = 根目录 + object_key，
+    # 而 object_key 本身已含 `files/` 前缀（04-数据库设计 §4.1，该约定同时用于 MinIO）。
+    # 若此处写成 `./.data/files`，就会得到 `.data/files/files/xx/<hash>` 的重复层级。
+    storage_local_root: str = "./.data"
     minio_endpoint: str = "127.0.0.1:9000"
     minio_access_key: str = ""
     minio_secret_key: str = ""
