@@ -1,0 +1,63 @@
+# 本地开发依赖：只起 MySQL 9.7 + Redis，后端/前端在宿主机跑（保留热更新）。
+# 用法（仓库根目录）：docker compose -f deploy/docker-compose.dev.yml up -d
+#
+# ⚠️ 端口默认 3306 / 6379，与 backend/.env.example 一致（克隆即可跑、零配置）。
+#    若本机已有原生 MySQL / Redis 占用这两个端口，用环境变量改映射即可（**不改文件**）：
+#      PowerShell:  $env:LAWWIZ_DEV_DB_PORT="3307"; $env:LAWWIZ_DEV_REDIS_PORT="6380"
+#      bash:        LAWWIZ_DEV_DB_PORT=3307 LAWWIZ_DEV_REDIS_PORT=6380 docker compose ...
+#    并把 backend/.env 的 LAWWIZ_DB_PORT / LAWWIZ_REDIS_URL 指到对应端口。
+
+name: lawwiz-dev
+
+services:
+  mysql:
+    image: mysql:9.7
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # ⚠️ 必须含 STRICT_TRANS_TABLES：非严格模式下超长值会被**静默截断**（docs/04 §2.2）
+      - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --innodb_buffer_pool_size=128M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${LAWWIZ_MYSQL_ROOT_PASSWORD:-root-not-for-prod}
+      MYSQL_DATABASE: ${LAWWIZ_DB_NAME:-law_wiz}
+      MYSQL_USER: ${LAWWIZ_DB_USER:-lawwiz}
+      MYSQL_PASSWORD: ${LAWWIZ_DB_PASSWORD:-changeme}
+    ports:
+      - "${LAWWIZ_DEV_DB_PORT:-3306}:3306"
+    volumes:
+      - lawwiz-dev-mysql:/var/lib/mysql
+    healthcheck:
+      # ⚠️ 用真实查询而不是 `mysqladmin ping` —— 后者**认证失败也返回成功**，
+      #    会造成"看起来就绪、其实连不上"（deploy/README §4.1）。
+      test:
+        [
+          "CMD-SHELL",
+          'mysql -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -e "SELECT 1" >/dev/null 2>&1',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 384m
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    ports:
+      - "${LAWWIZ_DEV_REDIS_PORT:-6379}:6379"
+    volumes:
+      - lawwiz-dev-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 96m
+
+volumes:
+  lawwiz-dev-mysql:
+  lawwiz-dev-redis:
