@@ -310,18 +310,44 @@ def test_create_review_rejects_unknown_file(e2e_client) -> None:
     assert resp.json()["code"] == int(ErrorCode.FILE_NOT_FOUND)
 
 
-def test_create_review_rejects_other_users_file(e2e_client, sample_pdf, monkeypatch) -> None:
+def test_another_user_can_review_the_same_content(e2e_client, sample_pdf, monkeypatch) -> None:
+    """**同一份内容被第二个用户审查时必须可用。**
+
+    背景（这是联调中真实撞到的问题）：内容寻址是**全局去重**的 —— 第二个用户
+    上传同一份合同会拿到**同一个** `file_object`（`uploader_id` 仍是第一个上传者）。
+    若 C-01 按 `uploader_id` 鉴权，用户就**无法审查自己刚上传的文件**。
+
+    `uploader_id` 的语义是"谁**最先**上传了这个内容"，**不代表文件属于他**
+    （`docs/04 §5.1`）；且 C-01 的契约错误码里本就没有 `40301`
+    （见 `docs/05 §5.4`）。归属由 `review_task.user_id` / `contract.owner_id` 保证。
+    """
     from app.slices.review import service
 
     monkeypatch.setattr(service, "enqueue", lambda task_id: None)
-    owner = _auth_headers(e2e_client, phone="13800000021")
-    file_id = _upload(e2e_client, owner, sample_pdf)
 
-    intruder = _auth_headers(e2e_client, phone="13800000022")
-    resp = _create_review(e2e_client, intruder, file_id)
+    first = _auth_headers(e2e_client, phone="13800000021")
+    first_file_id = _upload(e2e_client, first, sample_pdf)
 
-    assert resp.status_code == 403
-    assert resp.json()["code"] == int(ErrorCode.FORBIDDEN)
+    second = _auth_headers(e2e_client, phone="13800000022")
+    again = e2e_client.post(
+        "/api/v1/files",
+        files={"file": ("我自己传的副本.pdf", sample_pdf, "application/pdf")},
+        headers=second,
+    )
+    second_file_id = again.json()["data"]["file_id"]
+
+    assert second_file_id == first_file_id, "同一内容应命中去重，复用同一个 file_object"
+    assert again.json()["data"]["is_duplicate"] is True
+
+    resp = _create_review(e2e_client, second, second_file_id)
+
+    assert resp.status_code == 202, f"第二个用户必须能审查这份内容，实际：{resp.text}"
+    # 审查任务归属于**发起者**，而不是文件的首个上传者
+    task_id = resp.json()["data"]["task_id"]
+    mine = e2e_client.get(f"{REVIEWS}/{task_id}", headers=second)
+    assert mine.json()["code"] == 0
+    theirs = e2e_client.get(f"{REVIEWS}/{task_id}", headers=first)
+    assert theirs.json()["code"] == int(ErrorCode.FORBIDDEN), "首个上传者无权查看他人发起的任务"
 
 
 # ============================================================

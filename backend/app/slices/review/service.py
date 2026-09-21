@@ -42,7 +42,7 @@ _SORT_OPTIONS = {
 
 
 def create_task(db: Session, *, user_id: int, payload: CreateReviewRequest) -> ReviewTaskData:
-    file_object = _load_owned_file(db, user_id=user_id, file_id=payload.file_id)
+    file_object = _load_file(db, file_id=payload.file_id)
     version = _ensure_contract_version(
         db, user_id=user_id, file_object=file_object, title=payload.contract_title
     )
@@ -70,7 +70,22 @@ def create_task(db: Session, *, user_id: int, payload: CreateReviewRequest) -> R
     return _to_task_data(task)
 
 
-def _load_owned_file(db: Session, *, user_id: int, file_id: str) -> FileObject:
+def _load_file(db: Session, *, file_id: str) -> FileObject:
+    """按 ID 取文件对象。
+
+    ⚠️ **刻意不校验 `uploader_id`**，两个理由：
+
+    1. **契约要求**：`docs/05 §5.4` 给 C-01 规定的错误码只有
+       `40001` / `40404` / `40905` / `42901`，**没有 `40301`** ——
+       即该接口本就不该因"文件不是你的"而拒绝。
+    2. **语义要求**：`uploader_id` 记录的是"谁**最先**上传了这个内容"，
+       **不代表文件属于他**（`docs/04 §5.1` 原文）。内容寻址是全局去重的，
+       第二个用户上传同一份合同会拿到同一个 `file_object` ——
+       若按 `uploader_id` 鉴权，他反而无法审查自己刚上传的文件。
+
+    **归属由业务表决定**：审查任务的归属是 `review_task.user_id`，
+    合同的归属是 `contract.owner_id`，两者都在本函数之外的层级校验。
+    """
     try:
         numeric_id = int(file_id)
     except (TypeError, ValueError) as exc:
@@ -79,8 +94,6 @@ def _load_owned_file(db: Session, *, user_id: int, file_id: str) -> FileObject:
     file_object = db.get(FileObject, numeric_id)
     if file_object is None or file_object.deleted_at is not None:
         raise BusinessError(ErrorCode.FILE_NOT_FOUND, "文件不存在")
-    if file_object.uploader_id != user_id:
-        raise BusinessError(ErrorCode.FORBIDDEN, "无权访问该文件")
     return file_object
 
 
