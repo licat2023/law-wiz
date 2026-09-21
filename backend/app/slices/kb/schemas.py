@@ -33,7 +33,15 @@ class CreateDocumentRequest(BaseModel):
     revision: str | None = Field(default=None, max_length=32)
     source: str | None = Field(default=None, max_length=200)
     source_url: str | None = Field(default=None, max_length=512)
-    content: str = Field(min_length=1, description="语料全文，content_hash 由后端计算")
+    content: str = Field(
+        min_length=1,
+        # 上限取 50 万字符：**最大部头的中国法律也在 20 万字符以内**
+        # （《民法典》约 10.6 万），留足余量的同时挡住"提交一个巨型文本"。
+        # ⚠️ 仅靠它挡不住超大请求体 —— 字段校验发生在请求体解析**之后**，
+        # 真正的内存防线是中间件层的请求体大小限制（见 api/middleware.py）。
+        max_length=500_000,
+        description="语料全文，content_hash 由后端计算",
+    )
 
 
 class DocumentCreatedData(BaseModel):

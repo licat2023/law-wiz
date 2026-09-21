@@ -47,7 +47,8 @@ class ExtractedTerms(BaseModel):
 class CreateReviewRequest(BaseModel):
     """C-01 请求体。"""
 
-    file_id: str = Field(description="已上传的文件 ID")
+    # BIGINT UNSIGNED 最长 20 位；仍按字符串传（接口约定），但要限长
+    file_id: str = Field(max_length=32, description="已上传的文件 ID")
     contract_title: str | None = Field(default=None, max_length=200)
     force: bool = Field(default=False, description="为 true 时允许对同一文件并发多个审查任务")
 

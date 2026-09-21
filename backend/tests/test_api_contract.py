@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import ErrorCode, http_status_for
@@ -136,3 +137,93 @@ def test_api_time_fields_match_the_contract_format(client: TestClient) -> None:
 
     assert _ISO_WITH_OFFSET.match(me["created_at"]), me["created_at"]
     assert _ISO_WITH_OFFSET.match(me["last_login_at"]), me["last_login_at"]
+
+
+# ============================================================
+# 请求体大小与字段长度上限
+# ============================================================
+
+
+def test_oversized_json_body_is_rejected_before_parsing(client: TestClient) -> None:
+    """超大 JSON 请求体必须在**解析之前**被拒。
+
+    ⚠️ 这一层不能用字段级 `max_length` 替代：字段校验发生在请求体**完整解析之后**，
+    届时内存已经被吃掉了。所以这里验证的是中间件层。
+    """
+    from app.api.middleware import _MAX_JSON_BODY_BYTES
+
+    resp = client.post(
+        "/api/v1/auth/login",
+        content="x" * (_MAX_JSON_BODY_BYTES + 1024),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 413, resp.text[:200]
+    body = resp.json()
+    assert body["code"] == int(ErrorCode.FILE_TOO_LARGE)
+    assert set(body) == {"code", "message", "data", "request_id"}, "仍是统一响应体"
+
+
+def test_rejected_body_still_carries_matching_request_id(client: TestClient) -> None:
+    """被中间件拒掉时，响应头与响应体仍是**同一个** request_id（与访问日志同源）。"""
+    from app.api.middleware import _MAX_JSON_BODY_BYTES
+
+    resp = client.post(
+        "/api/v1/auth/login",
+        content="x" * (_MAX_JSON_BODY_BYTES + 1024),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.headers.get("X-Request-ID") == resp.json()["request_id"]
+
+
+def test_multipart_and_json_have_different_limits() -> None:
+    """上传是 multipart，**不能**套用 JSON 的上限 —— 否则 20 MB 的文件传不上来。"""
+    from app.api.middleware import (
+        _MAX_JSON_BODY_BYTES,
+        _MULTIPART_OVERHEAD_BYTES,
+        _body_limit,
+    )
+    from app.core.config import get_settings
+
+    json_limit = _body_limit("application/json")
+    multipart_limit = _body_limit("multipart/form-data; boundary=xyz")
+
+    assert json_limit == _MAX_JSON_BODY_BYTES
+    assert multipart_limit == get_settings().max_upload_bytes + _MULTIPART_OVERHEAD_BYTES
+    assert multipart_limit > json_limit, "上传上限必须大于 JSON 上限，否则大文件会被误拒"
+
+
+def test_oversized_kb_content_is_rejected_at_field_level() -> None:
+    """字段级上限：kb 语料的 content（50 万字符）。"""
+    from app.slices.kb.schemas import CreateDocumentRequest
+
+    with pytest.raises(Exception) as excinfo:
+        CreateDocumentRequest(doc_type="law", title="超长语料", content="x" * 500_001)
+
+    assert "content" in str(excinfo.value)
+
+
+def test_refresh_token_length_is_bounded(client: TestClient) -> None:
+    """令牌长度必须受限 —— 不设上限等于允许客户端提交任意长字符串。"""
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "t" * 5000})
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)
+    fields = {detail["field"] for detail in resp.json()["data"]["details"]}
+    assert "refresh_token" in fields
+
+
+def test_review_file_id_length_is_bounded(client: TestClient, registered_user: dict[str, str]) -> None:
+    """`file_id` 是 BIGINT 的字符串形式，不该接受任意长输入。"""
+    resp = client.post(
+        "/api/v1/reviews",
+        json={"file_id": "9" * 100},
+        headers={
+            "Authorization": f"Bearer {registered_user['access_token']}",
+            "Idempotency-Key": "length-check",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)

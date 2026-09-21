@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.exception_handlers import register_exception_handlers
-from app.api.middleware import RequestContextMiddleware
+from app.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from app.core.config import get_settings
 from app.preflight import describe_runtime
 
@@ -97,8 +97,11 @@ def create_app() -> FastAPI:
     )
     app.state.settings = _settings
 
-    # 中间件顺序：RequestContext 在外，CORS 在内 —— 保证 CORS 的预检请求
-    # 也能拿到 request_id 并被记入访问日志
+    # ⚠️ 中间件顺序：Starlette 中**后添加的在更外层**。
+    # 期望由外到内为 CORS → RequestContext → BodySizeLimit，故添加顺序相反。
+    # RequestContext 必须比 BodySizeLimit 更靠外 —— 否则请求体被拒时，
+    # 响应拿不到与访问日志一致的 request_id。
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(RequestContextMiddleware)
     if not _settings.is_production:
         # 生产由 OpenResty 同源代理，不开启宽泛 CORS（05-接口设计 §8）

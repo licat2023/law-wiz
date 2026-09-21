@@ -93,11 +93,13 @@ class LoginData(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=8)
+    # 令牌由后端生成（`rt_` + 64 字符），上限留足余量即可；
+    # 不设上限等于允许客户端提交任意长字符串
+    refresh_token: str = Field(min_length=8, max_length=128)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str = Field(min_length=8)
+    refresh_token: str = Field(min_length=8, max_length=128)
 
 
 class ProfileData(BaseModel):
