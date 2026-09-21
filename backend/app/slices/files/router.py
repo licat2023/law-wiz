@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.api import CurrentUserId, RequestId, get_db
+from app.api import CurrentUserId, RateLimitedRead, RequestId, get_db
 from app.core.errors import ApiResponse
 from app.slices.files import service
 from app.slices.files.schemas import FileData, UploadFileData
@@ -34,6 +34,7 @@ async def upload_file(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[UploadFileData]:
     data = await service.read_upload(file)
     result = service.save_upload(
@@ -56,5 +57,6 @@ def get_file(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[FileData]:
     return ApiResponse.ok(service.get_file_meta(db, user_id=user_id, file_id=file_id), request_id=rid)

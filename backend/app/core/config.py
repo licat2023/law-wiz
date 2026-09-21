@@ -103,9 +103,12 @@ class Settings(BaseSettings):
     embedding_dim: int = 1024
 
     # ---------- 限流（见 05-接口设计 §4.5）----------
+    # 认证类按 **IP** 计数（防暴力破解），其余按**用户**计数
     rate_limit_auth_per_minute: int = 10
     rate_limit_ai_per_minute: int = 10
     rate_limit_read_per_minute: int = 120
+    # 轮询任务状态单独一档：前端轮询间隔最小 1 秒，60/分足够且能挡住死循环
+    rate_limit_poll_per_minute: int = 60
 
     # ---------- 跨域 ----------
     # 生产由 OpenResty 同源代理，不开启宽泛 CORS（见 05-接口设计 §8）

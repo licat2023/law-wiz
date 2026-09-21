@@ -15,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api import CurrentUserId, RequestId, get_db
+from app.api import CurrentUserId, RateLimitedAI, RateLimitedRead, RequestId, get_db
 from app.core.errors import ApiResponse, Page
 from app.slices.kb import service
 from app.slices.kb.schemas import (
@@ -42,8 +42,9 @@ DbSession = Annotated[Session, Depends(get_db)]
 def create_document(
     payload: CreateDocumentRequest,
     db: DbSession,
-    _: CurrentUserId,
+    _user: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[DocumentCreatedData]:
     data = service.create_document(db, payload)
     db.commit()
@@ -60,8 +61,9 @@ def trigger_index(
     document_id: int,
     background: BackgroundTasks,
     db: DbSession,
-    _: CurrentUserId,
+    _user: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedAI,
     payload: Annotated[IndexRequest | None, Body()] = None,
 ) -> ApiResponse[IndexTriggeredData]:
     data = service.trigger_index(db, document_id=document_id, force=payload.force if payload else False)
@@ -77,8 +79,9 @@ def trigger_index(
 )
 def list_documents(
     db: DbSession,
-    _: CurrentUserId,
+    _user: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
     page: int = Query(1),
     page_size: int = Query(20),
     doc_type: str | None = Query(None),
@@ -108,8 +111,9 @@ def list_documents(
 def get_document(
     document_id: int,
     db: DbSession,
-    _: CurrentUserId,
+    _user: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[DocumentDetailData]:
     return ApiResponse.ok(service.get_document(db, document_id), request_id=rid)
 
@@ -121,8 +125,9 @@ def get_document(
 )
 def search(
     db: DbSession,
-    _: CurrentUserId,
+    _user: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
     q: str = Query(description="检索文本"),
     top_k: int = Query(5),
     doc_type: str | None = Query(None),

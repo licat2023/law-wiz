@@ -15,7 +15,15 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.api import CurrentUserId, IdempotencyKey, RequestId, get_db
+from app.api import (
+    CurrentUserId,
+    IdempotencyKey,
+    RateLimitedAI,
+    RateLimitedPoll,
+    RateLimitedRead,
+    RequestId,
+    get_db,
+)
 from app.core import idempotency
 from app.core.errors import ApiResponse, Page
 from app.slices.review import service
@@ -46,6 +54,7 @@ def create_review(
     user_id: CurrentUserId,
     idempotency_key: IdempotencyKey,
     rid: RequestId,
+    _rate: RateLimitedAI,
 ) -> ApiResponse[ReviewTaskData]:
     # 同一 Idempotency-Key 在 24 小时内重复提交，返回首次结果而不重复创建（§3.5）
     cached = idempotency.load(idempotency_key)
@@ -69,6 +78,7 @@ def list_reviews(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
     page: int = Query(1),
     page_size: int = Query(20),
     status_filter: str | None = Query(None, alias="status"),
@@ -91,7 +101,7 @@ def list_reviews(
     summary="C-02 查询审查任务状态",
 )
 def get_review(
-    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId
+    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedPoll
 ) -> ApiResponse[ReviewTaskData]:
     return ApiResponse.ok(service.get_task(db, user_id=user_id, task_id=task_id), request_id=rid)
 
@@ -102,13 +112,15 @@ def get_review(
     summary="C-03 获取审查结果",
 )
 def get_review_result(
-    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId
+    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedRead
 ) -> ApiResponse[ReviewResultData]:
     return ApiResponse.ok(service.get_result(db, user_id=user_id, task_id=task_id), request_id=rid)
 
 
 @router.get("/reviews/{task_id}/report", summary="C-04 下载审查报告")
-def download_review_report(task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId) -> Response:
+def download_review_report(
+    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedRead
+) -> Response:
     filename, content = service.get_report(db, user_id=user_id, task_id=task_id)
     return Response(
         content=content,
@@ -133,6 +145,7 @@ def dismiss_risk_point(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[RiskPointData]:
     data = service.dismiss_risk_point(
         db,

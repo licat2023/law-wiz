@@ -11,7 +11,15 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api import CurrentUserId, IdempotencyKey, RequestId, get_db
+from app.api import (
+    CurrentUserId,
+    IdempotencyKey,
+    RateLimitedAI,
+    RateLimitedPoll,
+    RateLimitedRead,
+    RequestId,
+    get_db,
+)
 from app.core import idempotency
 from app.core.errors import ApiResponse, Page
 from app.slices.qa import service
@@ -40,6 +48,7 @@ def create_session(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[SessionData]:
     data = service.create_session(db, user_id=user_id, payload=payload)
     db.commit()
@@ -55,6 +64,7 @@ def list_sessions(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
     page: int = Query(1),
     page_size: int = Query(20),
     status_filter: str | None = Query(None, alias="status"),
@@ -81,6 +91,7 @@ def get_session(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedPoll,
     page: int = Query(1),
     page_size: int = Query(20),
 ) -> ApiResponse[SessionDetailData]:
@@ -102,6 +113,7 @@ def ask(
     user_id: CurrentUserId,
     idempotency_key: IdempotencyKey,
     rid: RequestId,
+    _rate: RateLimitedAI,
 ) -> ApiResponse[AskData]:
     # 同一 Idempotency-Key 在 24 小时内重复提交，返回首次结果而不重复提问（§3.5）
     cached = idempotency.load(idempotency_key)
@@ -130,6 +142,7 @@ def archive_session(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
+    _rate: RateLimitedRead,
 ) -> ApiResponse[None]:
     service.archive(db, user_id=user_id, session_id=session_id)
     db.commit()

@@ -142,6 +142,29 @@ def _memory_idempotency_store(monkeypatch) -> Generator[dict[str, dict]]:
 
 
 @pytest.fixture(autouse=True)
+def _memory_rate_limit_store(monkeypatch) -> Generator[dict[str, int]]:
+    """限流计数的内存替身。
+
+    ⚠️ **必须替换**：真实实现写 Redis。不替换会**跨用例累积计数** ——
+    某个用例多打几次接口，就会让后续用例莫名收到 `42901`
+    （与幂等缓存污染属于同一类问题：测试依赖了外部共享状态）。
+
+    ⚠️ 只替换 `_incr`（存储），**窗口划分与阈值判断仍走真实实现** ——
+    替身不复制业务逻辑，避免它与生产逻辑分叉。
+    """
+    counters: dict[str, int] = {}
+
+    def _incr(key: str, ttl: int) -> int:
+        counters[key] = counters.get(key, 0) + 1
+        return counters[key]
+
+    from app.infra import ratelimit
+
+    monkeypatch.setattr(ratelimit, "_incr", _incr)
+    yield counters
+
+
+@pytest.fixture(autouse=True)
 def _temp_storage(tmp_path, monkeypatch):
     """把文件存储指向临时目录，避免测试污染项目的 `.data/`。"""
     from app.infra import storage as storage_module

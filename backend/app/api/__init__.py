@@ -15,12 +15,22 @@ from app.api.deps import (
     get_idempotency_key,
     get_request_id,
 )
+from app.api.ratelimit import (
+    RateLimitedAI,
+    RateLimitedAuth,
+    RateLimitedPoll,
+    RateLimitedRead,
+)
 from app.infra.db.session import get_db
 
 __all__ = [
     "BearerToken",
     "CurrentUserId",
     "IdempotencyKey",
+    "RateLimitedAI",
+    "RateLimitedAuth",
+    "RateLimitedPoll",
+    "RateLimitedRead",
     "RequestId",
     "get_bearer_token",
     "get_current_user_id",

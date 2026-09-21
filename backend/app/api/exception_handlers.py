@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.ratelimit import rate_limit_headers
 from app.core.errors import ApiResponse, BusinessError, ErrorCode, FieldError, http_status_for
 
 logger = logging.getLogger("lawwiz.error")
@@ -28,11 +29,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _business_error(request: Request, exc: BusinessError) -> JSONResponse:
         """业务异常。服务层只管抛，这里负责翻译成 HTTP。"""
         data = {"details": [e.model_dump() for e in exc.field_errors]} if exc.field_errors else None
+        # 被限流时必须补上 Retry-After 与 X-RateLimit-* —— 限流依赖设置的头
+        # 在**新构造的响应**里会丢失，所以从 request.state 取回来（见 api/ratelimit.py）
+        headers = rate_limit_headers(request) if exc.code == ErrorCode.RATE_LIMITED else None
         return JSONResponse(
             status_code=exc.http_status,
             content=ApiResponse.fail(
                 exc.code, exc.message, data=data, request_id=_request_id(request)
             ).model_dump(),
+            headers=headers,
         )
 
     @app.exception_handler(RequestValidationError)
