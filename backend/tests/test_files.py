@@ -178,6 +178,79 @@ def test_upload_requires_auth(client: TestClient) -> None:
     assert resp.json()["code"] == int(ErrorCode.ACCESS_TOKEN_INVALID)
 
 
+# --- 上传配额（见风险清单 #6）---
+
+
+def test_upload_quota_bytes_rejects_further_uploads(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """累计字节超限必须回 `41301`（复用"文件过大"码，属知情权衡）。
+
+    第一份恰好等于配额（放行），第二份使累计超限 → 拒绝。
+    """
+    from app.core.config import get_settings
+
+    first = build_pdf("Quota One")
+    monkeypatch.setattr(get_settings(), "upload_quota_bytes_per_user", len(first))
+
+    assert _upload(client, first, "one.pdf", auth_headers).status_code == 201
+
+    resp = _upload(client, build_pdf("Quota Two"), "two.pdf", auth_headers)
+
+    assert resp.status_code == 413
+    assert resp.json()["code"] == int(ErrorCode.FILE_TOO_LARGE)
+
+
+def test_upload_quota_count_rejects_further_uploads(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """文件数超限也必须拒绝（防大量小文件）。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "upload_quota_files_per_user", 1)
+
+    assert _upload(client, build_pdf("One"), "one.pdf", auth_headers).status_code == 201
+
+    resp = _upload(client, build_pdf("Two"), "two.pdf", auth_headers)
+
+    assert resp.status_code == 413
+    assert resp.json()["code"] == int(ErrorCode.FILE_TOO_LARGE)
+
+
+def test_dedup_upload_bypasses_quota(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**重复内容不落盘、不占配额** —— 配额已满时重复上传仍应放行。
+
+    否则"去重"与"配额"两条规则会互相打架：明明没占新空间，却被拒绝。
+    """
+    from app.core.config import get_settings
+
+    pdf = build_pdf("Shared Content")
+    monkeypatch.setattr(get_settings(), "upload_quota_bytes_per_user", len(pdf))
+
+    assert _upload(client, pdf, "a.pdf", auth_headers).json()["data"]["is_duplicate"] is False
+
+    again = _upload(client, pdf, "b.pdf", auth_headers)
+
+    assert again.status_code == 201
+    assert again.json()["data"]["is_duplicate"] is True
+
+
+def test_upload_quota_is_per_user(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配额按用户隔离：一个用户占满不影响其他用户。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "upload_quota_files_per_user", 1)
+    assert _upload(client, build_pdf("A"), "a.pdf", auth_headers).status_code == 201
+
+    other = _register_and_login(client, "13800000077")
+
+    assert _upload(client, build_pdf("B"), "b.pdf", other).status_code == 201
+
+
 def test_original_name_strips_path_components(client: TestClient, auth_headers: dict[str, str]) -> None:
     """文件名里的路径成分必须剥掉，只留文件名本身。"""
     unique = build_pdf("Path Traversal Attempt")

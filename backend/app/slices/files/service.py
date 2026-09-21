@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,37 @@ async def read_upload(upload: UploadFile) -> bytes:
     return data
 
 
+def _check_quota(db: Session, *, user_id: int, incoming_bytes: int) -> None:
+    """每用户上传配额检查（见风险清单 #6）。
+
+    只在**新增内容**时调用 —— 去重命中不落盘，不占用配额。
+    超限复用 `FILE_TOO_LARGE`（`41301`）：文档中该码的语义是"单个文件超标"，
+    这里拉伸为"累计超标"，属**知情权衡**（文档未定义专门的配额码）。
+
+    ⚠️ 已知局限：并发上传可能同时通过检查而略微超出上限（无跨请求串行化）。
+    配额是防"磁盘被单个用户写满"的**粗粒度兜底**，不是精确计量。
+    """
+    used_bytes, used_files = db.execute(
+        select(
+            func.coalesce(func.sum(FileObject.byte_size), 0),
+            func.count(FileObject.id),
+        ).where(FileObject.uploader_id == user_id, FileObject.deleted_at.is_(None))
+    ).one()
+
+    byte_quota = _settings.upload_quota_bytes_per_user
+    file_quota = _settings.upload_quota_files_per_user
+    if used_bytes + incoming_bytes > byte_quota:
+        raise BusinessError(
+            ErrorCode.FILE_TOO_LARGE,
+            f"存储配额已满：累计上传不能超过 {byte_quota // (1024 * 1024)} MB",
+        )
+    if used_files + 1 > file_quota:
+        raise BusinessError(
+            ErrorCode.FILE_TOO_LARGE,
+            f"存储配额已满：上传文件数不能超过 {file_quota} 个",
+        )
+
+
 def save_upload(
     db: Session,
     *,
@@ -88,6 +119,8 @@ def save_upload(
 
     storage = get_storage()
     object_key = object_key_for(digest)
+    # 配额检查放在**落盘之前**：这是唯一会新增磁盘占用的分支（去重已在上面返回）。
+    _check_quota(db, user_id=user_id, incoming_bytes=len(data))
     # 先落盘再写库：若写库失败，对象存储里多一个无人引用的对象，代价可忽略（内容寻址，
     # 下次同内容上传正好复用它）；反过来则会出现"库里有记录、内容却不存在"。
     storage.put(object_key, data)

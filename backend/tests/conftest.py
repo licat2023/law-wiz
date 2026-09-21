@@ -231,6 +231,48 @@ def sample_pdf() -> bytes:
 
 
 @pytest.fixture
+def make_pdf():
+    """按页数构造合法 PDF（每页一段文本），用于验证页数上限等路径。
+
+    结构与 `sample_pdf` 相同，只是把页对象与内容流按页数展开。
+    """
+
+    def _build(page_texts: list[str]) -> bytes:
+        n = len(page_texts)
+        font_num = 3 + 2 * n
+        kids = " ".join(f"{3 + 2 * i} 0 R" for i in range(n))
+        objects: list[bytes] = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            f"<< /Type /Pages /Kids [{kids}] /Count {n} >>".encode(),
+        ]
+        for i, text in enumerate(page_texts):
+            content = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET".encode()
+            objects.append(
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                f"/Contents {4 + 2 * i} 0 R /Resources << /Font << /F1 {font_num} 0 R >> >> >>".encode()
+            )
+            objects.append(
+                b"<< /Length " + str(len(content)).encode() + b">>\nstream\n" + content + b"\nendstream"
+            )
+        objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+        out = bytearray(b"%PDF-1.4\n")
+        offsets = []
+        for i, obj in enumerate(objects, start=1):
+            offsets.append(len(out))
+            out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+        xref_pos = len(out)
+        size = len(objects) + 1
+        out += f"xref\n0 {size}\n".encode() + b"0000000000 65535 f \n"
+        for off in offsets:
+            out += f"{off:010d} 00000 n \n".encode()
+        out += f"trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+        return bytes(out)
+
+    return _build
+
+
+@pytest.fixture
 def e2e_client(monkeypatch, _temp_storage):
     """**允许真实提交**的端到端环境，用于审查流水线。
 

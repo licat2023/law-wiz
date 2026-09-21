@@ -173,8 +173,12 @@ def _stage_ocr(db: Session, task: ReviewTask, ctx: _Context) -> None:
 
     source = "parse"
     text = ""
+    page_count: int | None = None
     if fmt.is_text_extractable:
-        text = parsing.extract_text(data, fmt) or ""
+        parsed = parsing.extract_text(data, fmt)
+        if parsed is not None:
+            text = parsed.text
+            page_count = parsed.page_count
 
     if not text.strip():
         # 走到这里有两种情况：① 图片文件（本来就该 OCR）；② **扫描版 PDF** ——
@@ -189,7 +193,7 @@ def _stage_ocr(db: Session, task: ReviewTask, ctx: _Context) -> None:
     ctx.text_source = source
     version.plain_text = text
     version.text_source = source
-    version.page_count = version.page_count or None
+    version.page_count = page_count
 
 
 # ============================================================

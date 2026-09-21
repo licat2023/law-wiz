@@ -272,6 +272,28 @@ def test_missing_file_content_fails_with_actionable_message(e2e_client, sample_p
     assert "重新上传" in task["error_message"], "失败信息应包含可操作的指引"
 
 
+def test_pdf_over_page_limit_fails_task_with_actionable_message(e2e_client, make_pdf, monkeypatch) -> None:
+    """页数超限的 PDF 必须让任务**优雅失败**，而不是把进程内存吃干。
+
+    上限由解析层兜住（上传侧只限制 20 MB，管不住页数）。
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "max_pdf_pages", 1)
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, make_pdf(["第一页", "第二页"]))
+
+    created = _create_review(e2e_client, headers, file_id)
+    assert created.status_code == 202
+    task_id = created.json()["data"]["task_id"]
+
+    task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == str(int(ErrorCode.PARAM_INVALID))
+    assert "页" in task["error_message"], "失败信息应说明是页数问题"
+
+
 # ============================================================
 # 越权与不存在
 # ============================================================
