@@ -6,9 +6,15 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import re
+
 from fastapi.testclient import TestClient
 
 from app.core.errors import ErrorCode, http_status_for
+
+# 契约要求的时间形状：ISO 8601 **带时区偏移**、毫秒（05-接口设计 §3）
+_ISO_WITH_OFFSET = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$")
 
 
 def test_health_returns_envelope(client: TestClient) -> None:
@@ -81,3 +87,52 @@ def test_error_code_to_http_status_mapping() -> None:
     assert http_status_for(ErrorCode.INTERNAL_ERROR) == 500
     assert http_status_for(ErrorCode.LLM_BAD_RESPONSE) == 502
     assert http_status_for(ErrorCode.LLM_UNAVAILABLE) == 503
+
+
+# ============================================================
+# 时间格式（05-接口设计 §3）
+# ============================================================
+
+
+def test_to_iso_produces_offset_and_milliseconds() -> None:
+    """`to_iso` 是**所有切片唯一的时间序列化出口**，行为必须符合契约。
+
+    为什么专门测它：不带时区偏移的时间串会被 `new Date()` 按**浏览器本地时区**
+    解释 —— 时区不是 +08:00 的机器上时间就显示错了。而且这类缺陷不会被任何
+    "功能能否跑通"的测试覆盖，只能靠形状断言。
+    """
+    from app.core.clock import to_iso
+
+    assert to_iso(None) is None
+
+    # 库里存的是 naive 的北京时间 → 补上 +08:00
+    assert to_iso(dt.datetime(2026, 9, 20, 15, 58, 19, 637006)) == ("2026-09-20T15:58:19.637+08:00")
+    # 微秒截断为毫秒（与 DATETIME(3) 精度一致）
+    assert to_iso(dt.datetime(2026, 9, 20, 15, 58, 19, 123999)).endswith(".123+08:00")
+    # 已带时区的保持其自身偏移，不被改写成 +08:00
+    assert to_iso(dt.datetime(2026, 9, 20, 15, 58, 19, tzinfo=dt.UTC)) == ("2026-09-20T15:58:19.000+00:00")
+
+
+def test_api_time_fields_match_the_contract_format(client: TestClient) -> None:
+    """端到端确认各接口返回的时间串符合契约形状。
+
+    覆盖两条不同的产生路径：`/health` 由 Python 直接生成，
+    `/users/me` 由数据库 `DATETIME(3)` 读回 —— 两条都必须带偏移。
+    """
+    health = client.get("/api/v1/health").json()["data"]
+    assert _ISO_WITH_OFFSET.match(health["checked_at"]), health["checked_at"]
+    assert _ISO_WITH_OFFSET.match(health["runtime"]["started_at"]), health["runtime"]["started_at"]
+
+    client.post(
+        "/api/v1/auth/register",
+        json={"phone": "13800000077", "password": "abc12345", "verify_code": "000000"},
+    )
+    login = client.post("/api/v1/auth/login", json={"account": "13800000077", "password": "abc12345"}).json()[
+        "data"
+    ]
+    me = client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {login['access_token']}"}).json()[
+        "data"
+    ]
+
+    assert _ISO_WITH_OFFSET.match(me["created_at"]), me["created_at"]
+    assert _ISO_WITH_OFFSET.match(me["last_login_at"]), me["last_login_at"]

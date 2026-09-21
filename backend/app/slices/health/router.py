@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 from typing import Annotated, Any
 
@@ -27,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import RequestId, get_db
+from app.core.clock import now_beijing, to_iso
 from app.core.config import get_settings
 from app.core.errors import ApiResponse, ErrorCode
 from app.infra.cache import ping as redis_ping
@@ -37,7 +37,8 @@ logger = logging.getLogger("lawwiz.health")
 router = APIRouter(tags=["系统"])
 
 _settings = get_settings()
-_STARTED_AT = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).replace(tzinfo=None).isoformat()
+# ⚠️ 时间必须经 core.clock 序列化：契约要求 ISO 8601 带时区偏移（05-接口设计 §3）
+_STARTED_AT = to_iso(now_beijing())
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -108,7 +109,7 @@ def health(db: DbSession, rid: RequestId, response: Response) -> ApiResponse[dic
             "started_at": _STARTED_AT,
         },
         "components": components,
-        "checked_at": dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).replace(tzinfo=None).isoformat(),
+        "checked_at": to_iso(now_beijing()),
     }
 
     # 仅数据库不可用视为整体不可用

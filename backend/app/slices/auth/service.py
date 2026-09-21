@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-import datetime as dt
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import now_beijing, to_iso
 from app.core.config import get_settings
 from app.core.errors import BusinessError, ErrorCode, FieldError
 from app.core.security import (
@@ -40,10 +39,6 @@ _settings = get_settings()
 
 # 开发环境固定验证码（05-接口设计 §8）。生产环境由启动校验强制关闭。
 _DEV_FIXED_CODE = "000000"
-
-
-def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).replace(tzinfo=None)
 
 
 def _verify_code_ok(code: str) -> bool:
@@ -115,7 +110,7 @@ def login(db: Session, payload: LoginRequest) -> LoginData:
     if user.status != "active":
         raise BusinessError(ErrorCode.ACCOUNT_DISABLED, "账号已被停用")
 
-    user.last_login_at = _now()
+    user.last_login_at = now_beijing()
     db.flush()
     return _issue_tokens(user.id)
 
@@ -158,8 +153,8 @@ def get_user_data(db: Session, user_id: int) -> UserData:
         email=mask_email(user.email),
         account_type=user.account_type,
         status=user.status,
-        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
-        created_at=user.created_at.isoformat() if user.created_at else "",
+        last_login_at=to_iso(user.last_login_at),
+        created_at=to_iso(user.created_at) or "",
         profile=(
             ProfileData(
                 real_name=profile.real_name,
