@@ -69,6 +69,28 @@ def test_database_unavailable_maps_to_503() -> None:
     assert http_status_for(ErrorCode.DATABASE_UNAVAILABLE) == 503
 
 
+def test_docs_endpoints_disabled_in_production(monkeypatch) -> None:
+    """生产环境必须关闭 `/docs` 与 `/openapi.json`。
+
+    二者会完整暴露接口契约（字段、错误码、参数约束），等于给攻击者
+    一份免费的信息收集清单。开发/测试环境保留，因此关闭**只由 app_env 驱动**。
+    """
+    from app.core.config import get_settings
+    from app.main import create_app
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "app_env", "production")
+    # 让启动校验通过：生产要求独立密钥、关闭固定验证码、禁用 fake。
+    monkeypatch.setattr(settings, "allow_fixed_verify_code", False)
+    monkeypatch.setattr(settings, "jwt_secret", "production-grade-secret")
+    monkeypatch.setattr(settings, "llm_provider", "stub")
+    monkeypatch.setattr(settings, "debug", False)
+
+    with TestClient(create_app()) as c:
+        assert c.get("/docs").status_code == 404
+        assert c.get("/openapi.json").status_code == 404
+
+
 def test_health_response_declares_503_in_openapi(client: TestClient) -> None:
     """503 必须出现在 OpenAPI 里。
 

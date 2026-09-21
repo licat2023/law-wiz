@@ -83,6 +83,11 @@ def register_routers(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     _validate_startup_config()
 
+    # 生产环境关闭接口文档端点：`/docs` 与 `/openapi.json` 会完整暴露接口契约
+    # （全部字段、错误码、参数约束），降低攻击者的信息收集成本。
+    # ⚠️ 只在生产关 —— 前端与联调依赖 `/docs`（见 backend/README.md）。
+    docs_enabled = not _settings.is_production
+
     app = FastAPI(
         title=f"{_settings.app_name} API",
         version="0.1.0",
@@ -90,9 +95,9 @@ def create_app() -> FastAPI:
             "智法宝（law-wiz）—— AI 法律助手平台后端。\n\n"
             "接口契约见 docs/05-接口设计.md；**本页由代码自动生成，是契约的唯一真源**。"
         ),
-        docs_url="/docs",
+        docs_url="/docs" if docs_enabled else None,
         redoc_url=None,
-        openapi_url="/openapi.json",
+        openapi_url="/openapi.json" if docs_enabled else None,
         debug=_settings.debug,
     )
     app.state.settings = _settings
