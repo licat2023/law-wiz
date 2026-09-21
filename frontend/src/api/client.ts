@@ -18,6 +18,7 @@ import axios, {
   type AxiosRequestConfig,
   type InternalAxiosRequestConfig,
 } from 'axios'
+import { ref } from 'vue'
 
 import { ErrorCode, type ApiResponse, type ErrorDetails, type LoginData } from './types'
 
@@ -70,18 +71,28 @@ export class ApiError extends Error {
 const ACCESS_TOKEN_KEY = 'lawwiz.access_token'
 const REFRESH_TOKEN_KEY = 'lawwiz.refresh_token'
 
+// ⚠️ 令牌必须放在 `ref` 里，**不能只读 sessionStorage**：登录态判定
+// （`auth.isAuthenticated`）是 computed，依赖的必须是**响应式**数据，
+// 否则登录写入令牌后它不会重新求值，导航栏要刷新页面才更新。
+const accessToken = ref<string | null>(sessionStorage.getItem(ACCESS_TOKEN_KEY))
+const refreshToken = ref<string | null>(sessionStorage.getItem(REFRESH_TOKEN_KEY))
+
 export const tokenStore = {
   get access(): string | null {
-    return sessionStorage.getItem(ACCESS_TOKEN_KEY)
+    return accessToken.value
   },
   get refresh(): string | null {
-    return sessionStorage.getItem(REFRESH_TOKEN_KEY)
+    return refreshToken.value
   },
   save(data: Pick<LoginData, 'access_token' | 'refresh_token'>) {
+    accessToken.value = data.access_token
+    refreshToken.value = data.refresh_token
     sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access_token)
     sessionStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
   },
   clear() {
+    accessToken.value = null
+    refreshToken.value = null
     sessionStorage.removeItem(ACCESS_TOKEN_KEY)
     sessionStorage.removeItem(REFRESH_TOKEN_KEY)
   },
