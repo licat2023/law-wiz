@@ -23,6 +23,28 @@ export default [
       // .vue 里的 <script lang="ts"> 需要 TS 解析器接管
       parserOptions: { parser: tseslint.parser },
     },
+    rules: {
+      // TS 已检查未声明变量；no-undef 不认识 DOM 全局（HTMLElement、URL 等）
+      'no-undef': 'off',
+    },
   },
   prettier,
+
+  {
+    languageOptions: {
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        localStorage: 'readonly',
+        File: 'readonly',
+        FormData: 'readonly',
+        URL: 'readonly',
+        Blob: 'readonly',
+      },
+    },
+  },
 ]

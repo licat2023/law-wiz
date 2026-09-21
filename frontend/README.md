@@ -20,14 +20,21 @@ pnpm dev        # http://localhost:5173
 src/
 ├── api/          接口封装
 │   ├── client.ts   Axios 实例、拦截器、令牌存储、统一拆包
-│   └── types.ts    **与后端 Pydantic 模型镜像的类型定义**
+│   ├── types.ts    **与后端 Pydantic 模型镜像的类型定义**
+│   ├── auth.ts     M1 认证
+│   ├── review.ts   M2 合同审查（后端待实现，签名已冻结）
+│   └── qa.ts       M3 法律问答（后端待实现，签名已冻结）
 ├── stores/       Pinia 状态
 ├── router/       路由与鉴权守卫
 ├── views/        页面
+│   ├── LoginView.vue         ✅ 端到端参考实现
+│   ├── RegisterView.vue      ✅
+│   ├── MeView.vue            ✅
+│   ├── ReviewView.vue        ⏳ 待实现（纵切面 B）
+│   ├── ReviewDetailView.vue  ⏳ 待实现（纵切面 B）
+│   └── QaView.vue            ⏳ 待实现（纵切面 C）
 └── styles/       全局样式
 ```
-
-> **当前 `src/` 下只有空目录**，上面是目标结构。页面清单由团队认领时决定。
 
 ## 四条硬性约定（做错会出问题，不是风格偏好）
 
