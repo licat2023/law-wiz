@@ -32,7 +32,7 @@
 
       <div v-if="loading" class="progress-wrap">
         <p>{{ progressText }}</p>
-        <el-progress :percentage="progress" status="active" />
+        <el-progress :percentage="progress" :indeterminate="true" />
       </div>
     </div>
   </div>
