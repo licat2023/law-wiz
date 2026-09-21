@@ -1,8 +1,8 @@
 # 部署说明
 
-> ⚠️ **本文描述的是目标状态，编排文件尚未编写**：`docker-compose.dev.yml`、
-> `docker-compose.prod.yml` 与 `backend/Dockerfile` 都还不存在。下面命令里出现的文件名，
-> 就是落地时要建的文件 —— 本文是**它们必须满足的约束**（尤其是 §3.4 的内存上限）。
+> 编排文件：`deploy/docker-compose.dev.yml`、`deploy/docker-compose.prod.yml`、
+> `deploy/.env.example` 与 `backend/Dockerfile`（另有 `backend/.dockerignore`）。
+> 本文是它们的**约束说明** —— 改动编排前请先读 §3.4 的内存上限与 §四的两个坑。
 
 本项目部署在**一台 1Panel 主机**上（主机地址与凭据不入库，由团队内部维护）。
 **部署前必须先读容量约束**（见下方 §3.4），否则会踩内存不足的坑。
@@ -36,6 +36,11 @@ pnpm install
 pnpm dev        # http://localhost:5173
 ```
 
+> **端口冲突**：dev compose 默认映射宿主机 `3306` / `6379`（与 `.env.example` 一致，克隆即可跑）。
+> 若本机已有原生 MySQL / Redis，用环境变量改映射即可，**不用改文件**：
+> `$env:LAWWIZ_DEV_DB_PORT="3307"; $env:LAWWIZ_DEV_REDIS_PORT="6380"`，
+> 并把 `backend/.env` 的 `LAWWIZ_DB_PORT` / `LAWWIZ_REDIS_URL` 指到对应端口。
+
 前端 dev server 把 `/api` 代理到 `127.0.0.1:8000`，因此**本地没有跨域问题**。
 
 ## 三、服务器部署
@@ -57,13 +62,16 @@ pnpm dev        # http://localhost:5173
 ```bash
 # 在服务器上
 mkdir -p /opt/law-wiz && cd /opt/law-wiz
-# 上传 docker-compose.prod.yml 与 .env（.env 由 .env.prod.example 复制并填好凭据）
-docker compose -f docker-compose.prod.yml up -d
+# 上传 docker-compose.prod.yml 与 .env（在 deploy/ 下由 .env.example 复制并填好凭据）
+docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f backend
 
 # 首次部署要建表（在 backend 容器内执行）
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
+
+> **对象存储（MinIO）不在本期编排里**：一期后端只实现 `local` 存储（`app/infra/storage.py`），
+> 文件落在命名卷 `lawwiz-data`（容器内 `/app/.data`）。`docs/02` 里的 MinIO 是 P2 目标。
 
 ### 3.3 上线前必须确认的三件事
 
