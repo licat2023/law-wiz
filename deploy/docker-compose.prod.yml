@@ -1,0 +1,103 @@
+# 服务器部署：完整栈 = MySQL + Redis + 后端。
+#
+# ⚠️ 刻意**不含**两样东西：
+#   - MinIO：一期只实现 local 存储（app/infra/storage.py），选 minio 会直接报错；
+#   - Nginx：80/443 已被 1Panel 的 OpenResty 占用，由它在面板里反代到本文件暴露的
+#     127.0.0.1:8000（deploy/README §3.1）。
+#
+# 用法（服务器上，先在 deploy/ 下 `cp .env.example .env` 并填好凭据）：
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+#
+# ⚠️ 每个服务都必须保留 `mem_limit`：部署主机内存极紧（可用约 950 MiB），
+#    不设上限的容器会把同机的其它服务（含禅道）一起拖垮（deploy/README §3.4）。
+
+name: lawwiz
+
+services:
+  mysql:
+    image: mysql:9.7
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --innodb_buffer_pool_size=128M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${LAWWIZ_MYSQL_ROOT_PASSWORD:?必须在 deploy/.env 中设置}
+      MYSQL_DATABASE: ${LAWWIZ_DB_NAME:-law_wiz}
+      MYSQL_USER: ${LAWWIZ_DB_USER:-lawwiz}
+      MYSQL_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须在 deploy/.env 中设置}
+    volumes:
+      - lawwiz-mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'mysql -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -e "SELECT 1" >/dev/null 2>&1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    mem_limit: 384m
+    # 不向宿主机发布端口：只有同网络的 backend 能访问
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - lawwiz-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    mem_limit: 96m
+    # 同上：不向宿主机发布端口
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: lawwiz-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 容器内按服务名寻址；覆盖 .env 里可能残留的 127.0.0.1
+      LAWWIZ_DB_HOST: mysql
+      LAWWIZ_DB_PORT: "3306"
+      LAWWIZ_REDIS_URL: redis://redis:6379/0
+      LAWWIZ_APP_ENV: production
+    ports:
+      # 只绑宿主机回环：对外由 1Panel 的 OpenResty 反代。端口可用变量覆盖以便本机验证。
+      - "127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"
+    volumes:
+      # 本地存储（内容寻址文件 + Chroma 持久化）落在命名卷，容器重建不丢数据
+      - lawwiz-data:/app/.data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # DB 正常时 /health 为 200；DB 不可用会返回 503（见 tests/test_health.py）
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    mem_limit: 384m
+
+volumes:
+  lawwiz-mysql:
+  lawwiz-redis:
+  lawwiz-data:
