@@ -229,6 +229,7 @@ def e2e_client(monkeypatch, _temp_storage):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
+    from app.slices.kb import pipeline as kb_pipeline
     from app.slices.review import pipeline as review_pipeline
 
     app = create_app()
@@ -242,6 +243,7 @@ def e2e_client(monkeypatch, _temp_storage):
 
     app.dependency_overrides[get_db] = _override_get_db
     monkeypatch.setattr(review_pipeline, "SessionLocal", factory)
+    monkeypatch.setattr(kb_pipeline, "SessionLocal", factory)
     # 流水线是具名导入，持有自己的 get_storage 引用，需单独替换
     monkeypatch.setattr(review_pipeline, "get_storage", lambda: _temp_storage)
 
@@ -250,3 +252,17 @@ def e2e_client(monkeypatch, _temp_storage):
 
     app.dependency_overrides.clear()
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _clean_vector_store():
+    """清空进程内的向量索引。
+
+    ⚠️ 它是**模块级全局状态**：不清理的话，一个用例索引进去的内容会被另一个
+    用例检索到 —— 与"幂等缓存污染测试"属于同一类问题（测试依赖了共享状态）。
+    """
+    from app.infra import vector
+
+    vector.clear()
+    yield
+    vector.clear()
