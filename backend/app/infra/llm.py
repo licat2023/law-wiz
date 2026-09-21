@@ -96,6 +96,18 @@ def _fake_response(schema: dict[str, Any]) -> dict[str, Any]:
             ]
         }
 
+    if "answer" in properties:
+        return {
+            "answer": (
+                "（演示占位）根据《中华人民共和国民法典》第五百八十五条，"
+                "约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据"
+                "当事人的请求予以适当减少。建议先与对方协商调整违约金比例。"
+            ),
+            # 引用第 1 条候选片段；若检索为空则对不上任何候选，
+            # 上层会据此把 has_citation 置为 false —— 这正是"溯源不了要说出来"。
+            "used_indexes": [1],
+        }
+
     if "parties" in properties:
         return {
             "parties": ["甲方：某某科技有限公司", "乙方：某某贸易有限公司"],

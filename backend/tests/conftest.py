@@ -230,6 +230,7 @@ def e2e_client(monkeypatch, _temp_storage):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     from app.slices.kb import pipeline as kb_pipeline
+    from app.slices.qa import pipeline as qa_pipeline
     from app.slices.review import pipeline as review_pipeline
 
     app = create_app()
@@ -244,6 +245,7 @@ def e2e_client(monkeypatch, _temp_storage):
     app.dependency_overrides[get_db] = _override_get_db
     monkeypatch.setattr(review_pipeline, "SessionLocal", factory)
     monkeypatch.setattr(kb_pipeline, "SessionLocal", factory)
+    monkeypatch.setattr(qa_pipeline, "SessionLocal", factory)
     # 流水线是具名导入，持有自己的 get_storage 引用，需单独替换
     monkeypatch.setattr(review_pipeline, "get_storage", lambda: _temp_storage)
 
