@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import now_beijing
 from app.core.errors import BusinessError, ErrorCode
 from app.infra import vector
+from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.models.knowledge import KbChunk, KbDocument
 
@@ -33,6 +34,11 @@ STATUS_FAILED = "failed"
 def run_index_pipeline(document_id: int) -> None:
     """向量化入口。**异常一律转成文档的失败状态**，绝不向外抛出。"""
     db = SessionLocal()
+    # ⚠️ 并发闸门：必须在第一次用数据库之前取得（见 review/pipeline.py 的同处说明）
+    if not pipeline_gate.acquire():
+        _mark_failed(db, document_id, "服务繁忙，请稍后重试")
+        db.close()
+        return
     try:
         document = db.get(KbDocument, document_id)
         if document is None:
@@ -72,6 +78,7 @@ def run_index_pipeline(document_id: int) -> None:
         _mark_failed(db, document_id, "服务器内部错误，索引未能完成")
     finally:
         db.close()
+        pipeline_gate.release()
 
 
 def _mark_failed(db: Session, document_id: int, message: str) -> None:

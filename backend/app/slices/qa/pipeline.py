@@ -21,6 +21,7 @@ from app.core.clock import now_beijing
 from app.core.config import get_settings
 from app.core.errors import BusinessError, ErrorCode
 from app.infra import llm, vector
+from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.models.knowledge import KbChunk, KbDocument
 from app.models.qa import QaCitation, QaMessage, QaSession
@@ -36,6 +37,11 @@ _GENERATION_FAILED = "回答生成失败，请稍后重试。"
 def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
     """生成 assistant 消息的内容与引用。**异常一律写进消息内容**，不向外抛。"""
     db = SessionLocal()
+    # ⚠️ 并发闸门：必须在第一次用数据库之前取得（见 review/pipeline.py 的同处说明）
+    if not pipeline_gate.acquire():
+        _write_failure(db, message_id, "服务繁忙，请稍后重试")
+        db.close()
+        return
     try:
         message = db.get(QaMessage, message_id)
         session = db.get(QaSession, session_id)
@@ -78,6 +84,7 @@ def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
         _write_failure(db, message_id, _GENERATION_FAILED)
     finally:
         db.close()
+        pipeline_gate.release()
 
 
 def _load_question(db: Session, *, session_id: int, before_message_id: int) -> str | None:

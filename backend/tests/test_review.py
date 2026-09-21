@@ -455,3 +455,56 @@ def test_dismiss_validates_body(e2e_client, sample_pdf, monkeypatch, body) -> No
 
     assert resp.status_code == 400
     assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)
+
+
+# ============================================================
+# 并发闸门（app/infra/concurrency.py）
+# ============================================================
+
+
+def test_pipeline_fails_task_when_concurrency_is_full(e2e_client, sample_pdf, monkeypatch) -> None:
+    """并发已满时，任务必须以**明确原因**失败。
+
+    为什么这样取舍：让它**失败得清楚**（`42901` + 可读消息），
+    而不是无限期挂在 `pending`（用户无从判断）或继续占着线程等下去
+    （那就等于没做并发限制）。
+    """
+    from app.infra.concurrency import PipelineGate
+    from app.slices.review import pipeline as review_pipeline
+
+    busy = PipelineGate(max_concurrent=1, timeout_seconds=0.05)
+    assert busy.acquire(), "先占满唯一的槽位"
+    monkeypatch.setattr(review_pipeline, "pipeline_gate", busy)
+
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+    task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]
+
+    task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == str(int(ErrorCode.RATE_LIMITED))
+    assert "繁忙" in task["error_message"], f"失败原因应可读：{task['error_message']}"
+
+
+def test_gate_is_released_after_pipeline_finishes(e2e_client, sample_pdf) -> None:
+    """流水线结束后必须释放槽位 —— 否则跑几次就把并发能力用光了。
+
+    `BoundedSemaphore` 还有个额外好处：释放多于占用会直接抛错，
+    所以本用例也能顺带发现"少 release 或多 release"的问题。
+    """
+    from app.infra.concurrency import pipeline_gate
+
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    for index in range(3):
+        resp = _create_review(e2e_client, headers, file_id, key=f"gate-{index}", force=True)
+        assert resp.status_code == 202, resp.text
+        task_id = resp.json()["data"]["task_id"]
+        task = e2e_client.get(f"{REVIEWS}/{task_id}", headers=headers).json()["data"]
+        # 默认 stub 提供方 → 流水线会失败，但**必须已经跑完并释放槽位**
+        assert task["status"] in ("succeeded", "failed"), task
+
+    assert pipeline_gate.acquire(0.1), "连续跑完三次后槽位应已全部归还"
+    pipeline_gate.release()

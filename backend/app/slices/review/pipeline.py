@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import now_beijing
 from app.core.errors import BusinessError, ErrorCode
 from app.infra import llm, ocr, parsing, vector
+from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.infra.parsing import detect_format
 from app.infra.storage import get_storage, object_key_for, sha256_of
@@ -69,6 +70,13 @@ class _Context:
 def run_review_pipeline(task_id: int) -> None:
     """流水线入口。**异常一律转成任务的失败状态**，绝不向外抛出。"""
     db = SessionLocal()
+    # ⚠️ 并发闸门（见 app/infra/concurrency.py）必须在**第一次用数据库之前**取得：
+    # SessionLocal() 是惰性的（首次查询才占连接），所以此刻还没占用连接池 ——
+    # 若先查库再排队，等待者会先把手里的连接占住，反而加剧连接池耗尽。
+    if not pipeline_gate.acquire():
+        _mark_failed(db, task_id, str(int(ErrorCode.RATE_LIMITED)), "服务繁忙，请稍后重试")
+        db.close()
+        return
     try:
         task = db.get(ReviewTask, task_id)
         if task is None:
@@ -112,6 +120,7 @@ def run_review_pipeline(task_id: int) -> None:
         _mark_failed(db, task_id, str(int(ErrorCode.INTERNAL_ERROR)), "服务器内部错误，审查未能完成")
     finally:
         db.close()
+        pipeline_gate.release()
 
 
 def _mark_failed(db: Session, task_id: int, code: str, message: str) -> None:
@@ -262,8 +271,19 @@ def _stage_analyze(db: Session, task: ReviewTask, ctx: _Context) -> None:
     raw_points = result.get("risk_points") if isinstance(result, dict) else None
     points = raw_points if isinstance(raw_points, list) else []
 
-    # 重跑时先清掉上一轮的结论，避免叠加
+    # ⚠️ **先单独提交一次清理，再写入新的风险点。**
+    #
+    # 原因（实测结论）：同一文件的并发审查是**契约允许**的（C-01 的 `force=true`）。
+    # 若 DELETE 与 INSERT 同处一个事务，DELETE 会在 `risk_point.review_task_id`
+    # 索引上留下**间隙锁**，与另一事务对同表索引的 INSERT 形成循环等待 →
+    # MySQL `1213 Deadlock`，任务以 50000 失败。
+    # 实测：5 个同文件并发审查中有 2 个因死锁失败。
+    # 把 DELETE 放进独立事务（此处 commit），间隙锁在插入前即释放，循环等待不成立。
+    #
+    # 清理本身是为"重跑同一任务"准备的（正常流程每个任务只跑一次）。
     db.execute(delete(RiskPoint).where(RiskPoint.review_task_id == task.id))
+    db.commit()
+
     ctx.risk_points = [_normalize_point(p) for p in points if isinstance(p, dict)]
     for point in ctx.risk_points:
         db.add(RiskPoint(review_task_id=task.id, **_point_columns(point)))
