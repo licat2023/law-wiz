@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import secrets
 import uuid
@@ -25,19 +26,35 @@ BCRYPT_ROUNDS = 12
 _BCRYPT_MAX_BYTES = 72
 
 
-def hash_password(plain: str) -> str:
-    """生成密码哈希。**绝不存明文**（04-数据库设计 §7.1）。"""
+def _hash_password_blocking(plain: str) -> str:
     raw = plain.encode("utf-8")[:_BCRYPT_MAX_BYTES]
     return bcrypt.hashpw(raw, bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("ascii")
 
 
-def verify_password(plain: str, password_hash: str) -> bool:
-    """校验密码。哈希串损坏时返回 False 而不是抛异常，避免泄露内部状态。"""
+def _verify_password_blocking(plain: str, password_hash: str) -> bool:
     try:
         raw = plain.encode("utf-8")[:_BCRYPT_MAX_BYTES]
         return bcrypt.checkpw(raw, password_hash.encode("ascii"))
     except ValueError, TypeError:
         return False
+
+
+async def hash_password(plain: str) -> str:
+    """生成密码哈希。**绝不存明文**（04-数据库设计 §7.1）。
+
+    ⚠️ 异步不是装饰：bcrypt 12 轮约 **100–300 ms** 的纯 CPU 时间，
+    直接在事件循环里跑会让期间**所有**请求排队（登录、上传都会卡）。
+    交给 `asyncio.to_thread` 走线程池。
+    """
+    return await asyncio.to_thread(_hash_password_blocking, plain)
+
+
+async def verify_password(plain: str, password_hash: str) -> bool:
+    """校验密码。哈希串损坏时返回 False 而不是抛异常，避免泄露内部状态。
+
+    与 `hash_password` 同理：bcrypt 校验同样是百毫秒级 CPU 操作。
+    """
+    return await asyncio.to_thread(_verify_password_blocking, plain, password_hash)
 
 
 # ============================================================

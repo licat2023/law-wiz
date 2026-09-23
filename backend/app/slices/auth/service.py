@@ -85,7 +85,7 @@ async def register(db: AsyncSession, payload: RegisterRequest) -> str:
     user = User(
         phone=payload.phone,
         email=payload.email,
-        password_hash=hash_password(payload.password),
+        password_hash=await hash_password(payload.password),
     )
     db.add(user)
     await db.flush()
@@ -104,7 +104,7 @@ async def login(db: AsyncSession, payload: LoginRequest) -> LoginData:
     account = payload.account.strip()
     user = await db.scalar(select(User).where((User.phone == account) | (User.email == account)))
 
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or not await verify_password(payload.password, user.password_hash):
         raise BusinessError(ErrorCode.BAD_CREDENTIALS, "账号或密码错误")
 
     if user.status != "active":

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -273,7 +275,8 @@ async def get_report(db: AsyncSession, *, user_id: int, task_id: int) -> tuple[s
         raise BusinessError(ErrorCode.REVIEW_NOT_FOUND, "审查报告文件不存在")
 
     filename = file_object.original_name or f"review-{task.id}.pdf"
-    return filename, get_storage().get(file_object.object_key)
+    # 读取报告 PDF 是磁盘 I/O（可能到 MB 级）→ 过 `asyncio.to_thread`
+    return filename, await asyncio.to_thread(get_storage().get, file_object.object_key)
 
 
 # ============================================================

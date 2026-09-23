@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -163,7 +164,7 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
         raise BusinessError(ErrorCode.FILE_NOT_FOUND, "合同文件不存在或已被删除")
 
     try:
-        data = get_storage().get(file_object.object_key)
+        data = await asyncio.to_thread(get_storage().get, file_object.object_key)
     except BusinessError as exc:
         # 数据库有记录、对象存储却没有内容 —— 说明两边不一致（人为清理、迁移
         # 未同步、对象存储丢数据等）。给出**可操作**的指引，而不是只说"不存在"。
@@ -179,7 +180,9 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
     text = ""
     page_count: int | None = None
     if fmt.is_text_extractable:
-        parsed = parsing.extract_text(data, fmt)
+        # ⚠️ 解析与 OCR 都是 CPU/IO 密集调用（大 PDF 可达百毫秒级），
+        # 一律过 `asyncio.to_thread`，避免阻塞事件循环。
+        parsed = await asyncio.to_thread(parsing.extract_text, data, fmt)
         if parsed is not None:
             text = parsed.text
             page_count = parsed.page_count
@@ -187,7 +190,7 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
     if not text.strip():
         # 走到这里有两种情况：① 图片文件（本来就该 OCR）；② **扫描版 PDF** ——
         # 文件头是 PDF 但没有文本层。二者都要交给 OCR，不能直接判定"无内容"。
-        text = ocr.ocr_extract_text(data)
+        text = await asyncio.to_thread(ocr.ocr_extract_text, data)
         source = "ocr"
 
     if not text.strip():
@@ -206,7 +209,8 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
 
 
 async def _stage_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    result = llm.complete_structured(
+    result = await asyncio.to_thread(
+        llm.complete_structured,
         prompts.TERMS_SYSTEM,
         prompts.TERMS_USER_TEMPLATE.format(text=ctx.text[: prompts.MAX_TEXT_CHARS]),
         prompts.TERMS_SCHEMA,
@@ -227,7 +231,7 @@ async def _stage_retrieve(db: AsyncSession, task: ReviewTask, ctx: _Context) -> 
         for key in ("liability", "payment_terms", "amount", "jurisdiction")
         if ctx.terms.get(key)
     )
-    hits = vector.search(query or ctx.text[:200], top_k=5)
+    hits = await asyncio.to_thread(vector.search, query or ctx.text[:200], 5)
     ctx.legal_basis = [
         {"doc_id": hit.doc_id, "chunk_id": hit.chunk_id, "text": hit.text, "score": hit.score} for hit in hits
     ]
@@ -265,7 +269,8 @@ async def _stage_analyze(db: AsyncSession, task: ReviewTask, ctx: _Context) -> N
         or "（未命中审查规则）"
     )
 
-    result = llm.complete_structured(
+    result = await asyncio.to_thread(
+        llm.complete_structured,
         prompts.ANALYZE_SYSTEM,
         prompts.ANALYZE_USER_TEMPLATE.format(
             terms=ctx.terms,
@@ -338,7 +343,9 @@ async def _stage_report(db: AsyncSession, task: ReviewTask, ctx: _Context) -> No
 
     title = await _contract_title(db, task)
     summary = _summary(counts)
-    pdf = build_report_pdf(
+    # 生成 PDF 与写盘都是重活（reportlab 排版 + 磁盘 I/O）→ 过 `asyncio.to_thread`
+    pdf = await asyncio.to_thread(
+        build_report_pdf,
         contract_title=title,
         summary=summary,
         counts=counts,
@@ -346,10 +353,10 @@ async def _stage_report(db: AsyncSession, task: ReviewTask, ctx: _Context) -> No
         risk_points=ctx.risk_points,
     )
 
-    digest = sha256_of(pdf)
+    digest = await asyncio.to_thread(sha256_of, pdf)
     storage = get_storage()
     object_key = object_key_for(digest)
-    storage.put(object_key, pdf)
+    await asyncio.to_thread(storage.put, object_key, pdf)
 
     file_object = FileObject(
         sha256=digest,

@@ -84,9 +84,10 @@ pnpm run build                              # = vue-tsc --noEmit && vite build
   MySQL 不支持 `INSERT ... RETURNING`，只写 `server_default` 的话，插入后读该列会触发
   隐式 SELECT —— 异步会话里同样抛 `MissingGreenlet`，而 **SQLite 测试测不出来**
   （SQLite 支持 RETURNING），只有连真实 MySQL 才暴露。实测：C-01 曾返回 50000 而 143 个用例全绿。
-- **阻塞调用暂未移出事件循环（知情项）**：bcrypt 口令哈希、PDF 解析 / 报告生成、本地磁盘 I/O
-  目前仍是同步调用。LLM / OCR 现在是 stub / fake（无真实阻塞），
-  **接入真实模型或处理大文件之前**必须改成 `asyncio.to_thread(...)`。
+- **重活一律过 `asyncio.to_thread`**：bcrypt 口令哈希、PDF 解析与报告生成、向量检索、
+  大模型 / OCR 调用、本地磁盘读写都已移出事件循环（`core/security.py`、各切片的
+  `service.py` / `pipeline.py`）。**新增这类调用时照做** —— 在 `async def` 里直接同步调用
+  会占住事件循环（期间所有请求排队），而**功能测试不会发现**。
 
 ## 验证纪律
 

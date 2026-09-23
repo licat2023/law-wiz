@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -105,7 +107,9 @@ async def save_upload(
             "仅支持 PDF、Word（.docx）与 JPG/PNG 图片",
         )
 
-    digest = sha256_of(data)
+    # ⚠️ 哈希与落盘都过 `asyncio.to_thread`：前者与文件大小成正比（上限 20 MB），
+    # 后者是磁盘写入 —— 在事件循环里直接做会让并发请求一起等。
+    digest = await asyncio.to_thread(sha256_of, data)
 
     existing = await db.scalar(
         select(FileObject).where(FileObject.sha256 == digest, FileObject.deleted_at.is_(None))
@@ -116,7 +120,7 @@ async def save_upload(
         # 该内容会**永远**无法恢复 —— 因为去重路径会一直跳过写盘。
         storage = get_storage()
         if not storage.exists(existing.object_key):
-            storage.put(existing.object_key, data)
+            await asyncio.to_thread(storage.put, existing.object_key, data)
         return _to_upload_data(existing, is_duplicate=True)
 
     storage = get_storage()
@@ -125,7 +129,7 @@ async def save_upload(
     await _check_quota(db, user_id=user_id, incoming_bytes=len(data))
     # 先落盘再写库：若写库失败，对象存储里多一个无人引用的对象，代价可忽略（内容寻址，
     # 下次同内容上传正好复用它）；反过来则会出现"库里有记录、内容却不存在"。
-    storage.put(object_key, data)
+    await asyncio.to_thread(storage.put, object_key, data)
 
     record = FileObject(
         sha256=digest,

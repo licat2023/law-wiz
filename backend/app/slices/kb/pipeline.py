@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy import select
@@ -63,7 +64,9 @@ async def run_index_pipeline(document_id: int) -> None:
 
             # 只把**分块 ID 与文本**交给向量层：它不知道关系库的结构，
             # 这样更换向量实现时关系型数据无需迁移（ADR-0004）。
-            vector.index_document(
+            # ⚠️ 向量化是 CPU 密集调用（要算全部嵌入）→ 过 `asyncio.to_thread`。
+            await asyncio.to_thread(
+                vector.index_document,
                 document.id,
                 [{"chunk_id": str(chunk.id), "text": chunk.content} for chunk in chunks],
             )

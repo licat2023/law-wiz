@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -55,7 +56,10 @@ async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
 
             started = time.perf_counter()
             context, candidates = await _build_context(db, question)
-            result = llm.complete_structured(
+            # ⚠️ 大模型调用（真实实现是 HTTP 请求）必须移出事件循环，
+            # 否则生成回答的几秒里服务无法处理任何其它请求。
+            result = await asyncio.to_thread(
+                llm.complete_structured,
                 prompts.QA_SYSTEM,
                 prompts.QA_USER_TEMPLATE.format(context=context, question=question),
                 prompts.QA_SCHEMA,
@@ -105,7 +109,7 @@ async def _build_context(db: AsyncSession, question: str) -> tuple[str, list[dic
     返回 (上下文文本, 候选列表)。候选列表的 `index` 与提示词里片段序号一一对应，
     模型回报的 `used_indexes` 据此映射回具体分块。
     """
-    hits = vector.search(question, top_k=prompts.MAX_CONTEXT_CHUNKS)
+    hits = await asyncio.to_thread(vector.search, question, prompts.MAX_CONTEXT_CHUNKS)
     if not hits:
         return "（未检索到相关法条）", []
 
