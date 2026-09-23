@@ -3,8 +3,12 @@
 面向在本仓库工作的 AI 代理与协作者的约定。**只写对未来任务有用的信息**：
 操作历史、已关闭的 Issue 编号、临时绕过手段属于 commit message，不属于本文件。
 
-> **当前状态**：仓库只有目录骨架、设计文档与依赖声明，**实现代码尚未编写**。
-> 下文命令中依赖实现的部分（启动、测试、迁移），要等对应代码落地后才能跑通。
+> **当前状态**：六个纵切面（health / auth / files / review / kb / qa）与前端均已落地，
+> 后端是**异步栈**：SQLAlchemy `AsyncSession` + aiomysql，Redis 走 `redis.asyncio`，
+> 后台流水线为 `async def`（由 `BackgroundTasks` 在事件循环中执行）。
+> 15 张表与两条 Alembic 迁移已入库；AI 能力（llm / ocr / embedding / vector）当前是
+> stub / fake 实现，接真实厂商只需替换 `app/infra/` 里的封装。
+> 测试跑 SQLite（`aiosqlite`）+ Redis 内存替身，**不需要起 MySQL 或 Redis**。
 
 ## 仓库布局
 
@@ -14,13 +18,15 @@ monorepo，四个顶层目录各司其职：
 | --- | --- |
 | `backend/` | FastAPI（Python 3.14）。`app/` 按**功能纵切面**组织，不按技术分层 |
 | `frontend/` | Vue 3 + Element Plus + Vite 单页应用 |
-| `deploy/` | 部署编排与说明（编排文件待编写） |
+| `deploy/` | 部署编排与说明（`docker-compose.dev.yml` / `docker-compose.prod.yml`） |
 | `docs/` | 设计文档 01–05、`adr/`、`assets/`（插图的 Mermaid 单一真源） |
 | `tools/` | 一次性脚本与渲染工具 |
 
-`backend/app/` 的分层：`core/`（配置、错误码、响应体、密码与令牌）、`api/`（横切依赖与中间件）、
-`infra/`（数据库、Redis）、`models/`（15 张表的 ORM，**集中登记**以保证 Alembic 不漏表）、
-`slices/`（纵切面，每个含 `schemas.py` / `service.py` / `router.py`）。
+`backend/app/` 的分层：`core/`（配置、错误码、响应体、时钟、密码与令牌、幂等缓存）、
+`api/`（横切依赖 `deps`、中间件、异常处理器、限流依赖）、
+`infra/`（数据库会话、Redis、存储、并发闸门，以及 AI 能力封装 llm / ocr / embedding / vector / parsing）、
+`models/`（15 张表的 ORM，**集中登记**以保证 Alembic 不漏表）、
+`slices/`（纵切面，每个含 `schemas.py` / `service.py` / `router.py`；异步流水线的切片另含 `pipeline.py`）。
 
 新增切片的步骤见 `backend/app/slices/README.md`。**跨切片共享代码只能进 `core/` / `infra/` / `models/`**，
 不允许两个切片互相 import 对方的 `service.py`。
@@ -34,7 +40,8 @@ cd backend
 uv sync --extra dev                        # 锁文件已入库；加 --frozen 可校验它没被改脏
 uv run --extra dev ruff check .
 uv run --extra dev ruff format --check .
-uv run --extra dev pytest
+uv run --extra dev pytest                  # 测试用 SQLite + Redis 内存替身，无需起容器
+uv run alembic upgrade head                # 建表/迁移（需先起 MySQL）
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -68,6 +75,14 @@ pnpm run build                              # = vue-tsc --noEmit && vite build
 - **AI 相关接口必须带 `Idempotency-Key`**（`POST /reviews`、`POST /qa/sessions/{id}/messages`）。
 - **同一个外部能力只在一处封装**，其它地方复用该封装。一期**不建 Provider 接口体系**
   （ADR-0012）—— 业务代码里不要出现同一个厂商 SDK 的分散调用，那会让将来真要替换时无处下手。
+- **数据库访问一律走异步栈**：`AsyncSession` + aiomysql（`infra/db/session.py`），
+  路由 / 服务 / 流水线统一 `await`；**不要**引入同步 `Session`、`create_engine` 或 pymysql 驱动
+  —— 异步上下文里用同步会话会抛 `MissingGreenlet`，同步驱动会阻塞事件循环。Redis 同理，用 `redis.asyncio`。
+- **不要访问 ORM 关系属性**（`task.report`、`session.messages` 之类）：异步会话下它会触发
+  隐式 IO 抛 `MissingGreenlet`，改用显式 `select(...)` 查询。
+- **阻塞调用暂未移出事件循环（知情项）**：bcrypt 口令哈希、PDF 解析 / 报告生成、本地磁盘 I/O
+  目前仍是同步调用。LLM / OCR 现在是 stub / fake（无真实阻塞），
+  **接入真实模型或处理大文件之前**必须改成 `asyncio.to_thread(...)`。
 
 ## 验证纪律
 
