@@ -80,6 +80,10 @@ pnpm run build                              # = vue-tsc --noEmit && vite build
   —— 异步上下文里用同步会话会抛 `MissingGreenlet`，同步驱动会阻塞事件循环。Redis 同理，用 `redis.asyncio`。
 - **不要访问 ORM 关系属性**（`task.report`、`session.messages` 之类）：异步会话下它会触发
   隐式 IO 抛 `MissingGreenlet`，改用显式 `select(...)` 查询。
+- **时间戳列必须同时给 Python 侧取值**（`default=` / `onupdate=`，见 `infra/db/base.py`）：
+  MySQL 不支持 `INSERT ... RETURNING`，只写 `server_default` 的话，插入后读该列会触发
+  隐式 SELECT —— 异步会话里同样抛 `MissingGreenlet`，而 **SQLite 测试测不出来**
+  （SQLite 支持 RETURNING），只有连真实 MySQL 才暴露。实测：C-01 曾返回 50000 而 143 个用例全绿。
 - **阻塞调用暂未移出事件循环（知情项）**：bcrypt 口令哈希、PDF 解析 / 报告生成、本地磁盘 I/O
   目前仍是同步调用。LLM / OCR 现在是 stub / fake（无真实阻塞），
   **接入真实模型或处理大文件之前**必须改成 `asyncio.to_thread(...)`。
