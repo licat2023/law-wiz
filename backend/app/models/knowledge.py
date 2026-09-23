@@ -19,6 +19,7 @@ import datetime as dt
 from sqlalchemy import Date, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.clock import now_beijing
 from app.infra.db.base import (
     BIGINT_PK,
     DATETIME_MS,
@@ -105,8 +106,16 @@ class KbChunk(Base):
     char_end: Mapped[int] = mapped_column(Integer, nullable=False)
     # 外部向量库中的 ID；NULL 表示尚未完成向量化
     vector_id: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
-    updated_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS,
+        nullable=False,
+        default=now_beijing,
+        onupdate=now_beijing,
+        server_default=SERVER_NOW_MS,
+    )
 
     document: Mapped[KbDocument] = relationship(back_populates="chunks")
 
@@ -154,4 +163,6 @@ class RiskRuleSource(Base):
     kb_document_id: Mapped[int] = mapped_column(
         BIGINT_PK, fk("kb_document.id", name="fk_rule_source_doc"), nullable=False
     )
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )

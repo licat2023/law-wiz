@@ -17,6 +17,7 @@ import datetime as dt
 from sqlalchemy import Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.clock import now_beijing
 from app.infra.db.base import (
     BIGINT_PK,
     DATETIME_MS,
@@ -77,6 +78,8 @@ class ContractVersion(Base):
     created_by: Mapped[int] = mapped_column(
         BIGINT_PK, fk("user.id", name="fk_contract_version_creator"), nullable=False
     )
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )
 
     contract: Mapped[Contract] = relationship()

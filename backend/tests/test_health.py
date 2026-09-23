@@ -17,8 +17,8 @@ from app.core.errors import ErrorCode, http_status_for
 def test_health_ok_when_dependencies_up(client: TestClient) -> None:
     """依赖正常时返回 200 + code 0 + status ok。
 
-    测试夹具用内存 SQLite，因此 database 恒为 ok；
-    Redis 未起时 redis 为 unavailable，整体降级为 degraded —— 两者都可接受。
+    测试夹具用内存 SQLite 与内存 Redis 替身，因此 database / redis 恒为 ok ——
+    结论不随开发机是否起了容器而变（见 conftest 的 `_no_real_redis`）。
     """
     resp = client.get("/api/v1/health")
     body = resp.json()

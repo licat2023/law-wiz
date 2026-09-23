@@ -17,6 +17,7 @@ import datetime as dt
 from sqlalchemy import Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.clock import now_beijing
 from app.infra.db.base import (
     BIGINT_PK,
     DATETIME_MS,
@@ -135,7 +136,7 @@ class ReviewReport(Base, TimestampMixin):
     medium_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     low_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     generated_at: Mapped[dt.datetime] = mapped_column(
-        DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
     )
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DATETIME_MS, nullable=True, default=None)
 

@@ -26,6 +26,8 @@ from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, MetaData, Text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.core.clock import now_beijing
+
 # 统一命名约定：使 Alembic 自动生成的迁移脚本有稳定、可读的约束名。
 # 否则匿名约束在不同环境会拿到不同名字，迁移无法对齐。
 NAMING_CONVENTION = {
@@ -108,14 +110,29 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
-    """通用时间字段。对应 04-数据库设计 §2.3。"""
+    """通用时间字段。对应 04-数据库设计 §2.3。
 
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    ⚠️ **必须同时给 Python 侧默认值**（`default` / `onupdate`），不能只靠
+    `server_default`。原因：MySQL 不支持 `INSERT ... RETURNING`，插入后 SQLAlchemy
+    并不知道服务端写入了什么，会把这两列标记为**过期**；随后在异步会话里读它们
+    （例如把 `created_at` 放进响应体）会触发一次隐式 SELECT —— 它发生在 greenlet
+    之外，直接抛 `MissingGreenlet`。SQLite 支持 RETURNING，因此这个差异
+    **只在 MySQL 上暴露**（实测：C-01 发起审查返回 50000，而测试全绿）。
+
+    `onupdate` 同时补上"更新时刷新 `updated_at`"的语义（docs/04 §2.3 要求
+    `ON UPDATE CURRENT_TIMESTAMP(3)`）。DDL 侧继续保留 `server_default`，
+    使裸 SQL 插入（脚本、数据修复）也有合理默认值。
+    """
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DATETIME_MS,
         nullable=False,
+        default=now_beijing,
+        onupdate=now_beijing,
         server_default=SERVER_NOW_MS,
-        server_onupdate=SERVER_NOW_MS,
     )
 
 

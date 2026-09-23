@@ -15,6 +15,7 @@ import datetime as dt
 from sqlalchemy import Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.clock import now_beijing
 from app.infra.db.base import (
     BIGINT_PK,
     DATETIME_MS,
@@ -68,7 +69,9 @@ class QaMessage(Base):
     model_name: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     token_usage: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )
 
     session: Mapped[QaSession] = relationship(back_populates="messages")
     citations: Mapped[list[QaCitation]] = relationship(back_populates="message", cascade="all, delete-orphan")
@@ -92,6 +95,8 @@ class QaCitation(Base):
     )
     quoted_text: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     relevance_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True, default=None)
-    created_at: Mapped[dt.datetime] = mapped_column(DATETIME_MS, nullable=False, server_default=SERVER_NOW_MS)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DATETIME_MS, nullable=False, default=now_beijing, server_default=SERVER_NOW_MS
+    )
 
     message: Mapped[QaMessage] = relationship(back_populates="citations")

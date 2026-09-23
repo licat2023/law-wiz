@@ -59,10 +59,7 @@ def db_session_factory(engine: AsyncEngine):
 
 @pytest.fixture(autouse=True)
 def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
-    """刷新令牌存储的内存替身，使认证用例不依赖 Redis。
-
-    只替换令牌相关函数，**不动 `ping`** —— 健康检查用例需要它反映真实情况。
-    """
+    """刷新令牌存储的内存替身，使认证用例不依赖 Redis。"""
     store: dict[str, int] = {}
 
     from app.infra import cache
@@ -99,6 +96,27 @@ def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
     monkeypatch.setattr(service, "revoke_refresh_token", revoke)
 
     yield store
+
+
+class _InMemoryRedis:
+    """Redis 客户端的替身：只支撑 `ping`（其余读写路径都有各自的内存替身）。
+
+    ⚠️ **连 `ping` 也必须替掉**：真实客户端会把连接绑定在**创建它的那个事件循环**上，
+    而每个 `TestClient` 跑在自己的循环里 —— 用例结束后连接被清理时会碰到已关闭的
+    循环（`RuntimeError: Event loop is closed`）。该缺陷**只在开发机恰好起了 Redis
+    时复现**，属"同一份代码在不同机器上结论不同"，必须消除。
+    """
+
+    async def ping(self) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _no_real_redis(monkeypatch) -> None:
+    """禁止测试进程创建真实 Redis 客户端（见 `_InMemoryRedis` 的说明）。"""
+    from app.infra import cache
+
+    monkeypatch.setattr(cache, "get_redis", _InMemoryRedis)
 
 
 @pytest.fixture(autouse=True)
