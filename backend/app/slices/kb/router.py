@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import CurrentUserId, RateLimitedAI, RateLimitedRead, RequestId, get_db
 from app.core.errors import ApiResponse, Page
@@ -30,7 +30,7 @@ from app.slices.kb.schemas import (
 
 router = APIRouter(tags=["法律知识库"])
 
-DbSession = Annotated[Session, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 @router.post(
@@ -39,15 +39,15 @@ DbSession = Annotated[Session, Depends(get_db)]
     status_code=status.HTTP_201_CREATED,
     summary="D-01 创建语料元数据",
 )
-def create_document(
+async def create_document(
     payload: CreateDocumentRequest,
     db: DbSession,
     _user: CurrentUserId,
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[DocumentCreatedData]:
-    data = service.create_document(db, payload)
-    db.commit()
+    data = await service.create_document(db, payload)
+    await db.commit()
     return ApiResponse.ok(data, request_id=rid)
 
 
@@ -57,7 +57,7 @@ def create_document(
     status_code=status.HTTP_202_ACCEPTED,
     summary="D-02 触发向量化索引（异步）",
 )
-def trigger_index(
+async def trigger_index(
     document_id: int,
     background: BackgroundTasks,
     db: DbSession,
@@ -66,8 +66,8 @@ def trigger_index(
     _rate: RateLimitedAI,
     payload: Annotated[IndexRequest | None, Body()] = None,
 ) -> ApiResponse[IndexTriggeredData]:
-    data = service.trigger_index(db, document_id=document_id, force=payload.force if payload else False)
-    db.commit()
+    data = await service.trigger_index(db, document_id=document_id, force=payload.force if payload else False)
+    await db.commit()
     background.add_task(service.enqueue, int(data.document_id))
     return ApiResponse.ok(data, request_id=rid)
 
@@ -77,7 +77,7 @@ def trigger_index(
     response_model=ApiResponse[Page[DocumentListItem]],
     summary="D-03 语料列表",
 )
-def list_documents(
+async def list_documents(
     db: DbSession,
     _user: CurrentUserId,
     rid: RequestId,
@@ -90,7 +90,7 @@ def list_documents(
     law_name: str | None = Query(None),
     sort: str = Query("-created_at"),
 ) -> ApiResponse[Page[DocumentListItem]]:
-    items, total = service.list_documents(
+    items, total = await service.list_documents(
         db,
         page=page,
         page_size=page_size,
@@ -108,14 +108,14 @@ def list_documents(
     response_model=ApiResponse[DocumentDetailData],
     summary="D-04 语料详情",
 )
-def get_document(
+async def get_document(
     document_id: int,
     db: DbSession,
     _user: CurrentUserId,
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[DocumentDetailData]:
-    return ApiResponse.ok(service.get_document(db, document_id), request_id=rid)
+    return ApiResponse.ok(await service.get_document(db, document_id), request_id=rid)
 
 
 @router.get(
@@ -123,7 +123,7 @@ def get_document(
     response_model=ApiResponse[KbSearchData],
     summary="D-05 语义检索",
 )
-def search(
+async def search(
     db: DbSession,
     _user: CurrentUserId,
     rid: RequestId,
@@ -134,7 +134,7 @@ def search(
     corpus_tier: int | None = Query(None),
     include_abolished: bool = Query(False),
 ) -> ApiResponse[KbSearchData]:
-    data = service.search(
+    data = await service.search(
         db,
         query=q,
         top_k=top_k,

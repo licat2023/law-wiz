@@ -12,7 +12,7 @@ Redis 在本项目中承担三件事（见 04-数据库设计 §4.1）：
 
 from __future__ import annotations
 
-from redis import Redis
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.core.config import get_settings
@@ -40,7 +40,7 @@ def _user_refresh_set(user_id: int) -> str:
     return f"{_settings.redis_key_prefix}urt:{user_id}"
 
 
-def store_refresh_token(user_id: int, token: str) -> None:
+async def store_refresh_token(user_id: int, token: str) -> None:
     """保存刷新令牌（存**摘要**，不存明文 —— 见 core/security.py 的说明）。"""
     from app.core.security import refresh_token_digest
 
@@ -53,13 +53,13 @@ def store_refresh_token(user_id: int, token: str) -> None:
         pipe.set(_refresh_key(digest), str(user_id), ex=ttl)
         pipe.sadd(_user_refresh_set(user_id), digest)
         pipe.expire(_user_refresh_set(user_id), ttl)
-        pipe.execute()
+        await pipe.execute()
     except RedisError as exc:
         # Redis 不可用时登录失败，属服务端问题而非用户问题
         raise BusinessError(ErrorCode.INTERNAL_ERROR, "登录状态存储不可用，请稍后重试") from exc
 
 
-def consume_refresh_token(token: str) -> int:
+async def consume_refresh_token(token: str) -> int:
     """校验并**一次性消费**刷新令牌，返回用户 ID。
 
     轮换语义：刷新成功的旧令牌立即失效（见 05-接口设计 §4.2）。
@@ -69,7 +69,7 @@ def consume_refresh_token(token: str) -> int:
 
     digest = refresh_token_digest(token)
     try:
-        value = get_redis().get(_refresh_key(digest))
+        value = await get_redis().get(_refresh_key(digest))
     except RedisError as exc:
         raise BusinessError(ErrorCode.INTERNAL_ERROR, "登录状态存储不可用，请稍后重试") from exc
 
@@ -77,11 +77,11 @@ def consume_refresh_token(token: str) -> int:
         raise BusinessError(ErrorCode.REFRESH_TOKEN_INVALID, "刷新令牌无效或已被撤销")
 
     user_id = int(value)
-    revoke_refresh_token(token, user_id=user_id)
+    await revoke_refresh_token(token, user_id=user_id)
     return user_id
 
 
-def revoke_refresh_token(token: str, *, user_id: int | None = None) -> None:
+async def revoke_refresh_token(token: str, *, user_id: int | None = None) -> None:
     """撤销单个刷新令牌。登出时调用。"""
     from app.core.security import refresh_token_digest
 
@@ -91,27 +91,27 @@ def revoke_refresh_token(token: str, *, user_id: int | None = None) -> None:
         pipe.delete(_refresh_key(digest))
         if user_id is not None:
             pipe.srem(_user_refresh_set(user_id), digest)
-        pipe.execute()
+        await pipe.execute()
     except RedisError:
         # 登出失败不应阻塞用户：令牌会在 TTL 到期后自然失效
         return
 
 
-def revoke_all_refresh_tokens(user_id: int) -> None:
+async def revoke_all_refresh_tokens(user_id: int) -> None:
     """撤销某用户的全部刷新令牌（强制下线 / 改密码后调用）。"""
     try:
         client = get_redis()
-        digests = client.smembers(_user_refresh_set(user_id))
+        digests = await client.smembers(_user_refresh_set(user_id))
         if digests:
-            client.delete(*[_refresh_key(d) for d in digests])
-        client.delete(_user_refresh_set(user_id))
+            await client.delete(*[_refresh_key(d) for d in digests])
+        await client.delete(_user_refresh_set(user_id))
     except RedisError:
         return
 
 
-def ping() -> bool:
+async def ping() -> bool:
     """健康检查用。"""
     try:
-        return bool(get_redis().ping())
+        return bool(await get_redis().ping())
     except RedisError:
         return False

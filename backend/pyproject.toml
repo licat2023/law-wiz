@@ -11,10 +11,10 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.12",
-    # --- 数据库 ---
+    # --- 数据库（异步栈：aiomysql 驱动 / AsyncSession）---
     "sqlalchemy>=2.0.36",
     "alembic>=1.14",
-    "pymysql>=1.1.1",
+    "aiomysql>=0.2.0",
     # --- 缓存与令牌（刷新令牌、限流计数）---
     "redis>=5.2",
     # --- 认证与密码学 ---
@@ -41,6 +41,7 @@ vector = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "aiosqlite>=0.20",  # 测试库的异步 SQLite 驱动（存储引擎与生产同为异步）
     "ruff>=0.8",
 ]
 

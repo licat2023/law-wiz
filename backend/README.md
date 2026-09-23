@@ -13,10 +13,19 @@ uv sync --extra dev
 
 # 3) 配置
 Copy-Item .env.example .env    # 按需修改
+
+# 4) 起依赖（MySQL 9.7 + Redis；在 deploy/ 目录执行）
+docker compose -f docker-compose.dev.yml up -d
+
+# 5) 建表
+uv run alembic upgrade head
+
+# 6) 启动
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
-> **当前 `app/` 下只有空目录**：`main.py`、数据库迁移（`alembic/`）、部署编排都还没写。
-> 因此「起依赖 → 建表 → 启动」这三步要等第一份实现落地时才能跑通，命令届时补回本文。
+> **技术栈**：数据库访问是**异步**的（SQLAlchemy `AsyncSession` + aiomysql），
+> Redis 用 `redis.asyncio`，后台流水线是 `async def`。
 
 启动后：
 
@@ -33,10 +42,9 @@ Copy-Item .env.example .env    # 按需修改
 随后其传递依赖 `tokenizers` 需从源码编译并拉取 Rust 工具链，安装中途失败。
 **报错指向 Rust，与 Python 毫无关系，极难定位。**
 
-**因此建环境时必须写绝对路径**（上面第 1 步）。原实现还有第二道防线：
-`app/preflight.py` 在导入任何模块前检查 `Py_GIL_DISABLED`，不通过则拒绝启动，
-且该检查在 `app/__init__.py` 中执行，任何入口都绕不过。骨架阶段这道防线尚未恢复，
-写入口代码时应当一并补回。
+**因此建环境时必须写绝对路径**（上面第 1 步）。第二道防线是 `app/preflight.py`：
+它在导入任何模块前检查 Python 版本与 `Py_GIL_DISABLED`，不通过则拒绝启动，
+且由 `app/__init__.py` 调用，任何入口（uvicorn / pytest / alembic）都绕不过。
 
 完整实验数据与被否决的方案见 [`docs/adr/0009-python-version-and-free-threading.md`](../docs/adr/0009-python-version-and-free-threading.md)。
 
@@ -44,17 +52,15 @@ Copy-Item .env.example .env    # 按需修改
 
 ```
 app/
-├── __init__.py        包标记（原实现的运行环境预检在此执行，见上文）
+├── __init__.py        包标记（运行环境预检在此执行，见上文）
+├── preflight.py       Python 版本 / GIL 预检与运行环境描述
 ├── main.py            应用入口：配置校验 → 中间件 → 异常处理器 → 路由
-├── core/              框架级原语：配置、错误码与响应体、密码与令牌
-├── api/               横切依赖：request_id、当前用户、数据库会话
-├── infra/             外部世界接入：数据库、Redis
+├── core/              框架级原语：配置、错误码与响应体、时钟、密码与令牌、幂等缓存
+├── api/               横切依赖：request_id、当前用户、数据库会话、限流、异常处理器
+├── infra/             外部世界接入：数据库会话、Redis、存储、并发闸门、AI 能力封装
 ├── models/            全部 ORM 模型（集中，保证 Alembic 不漏表）
-└── slices/            功能纵切面，每个含 schemas / service / router
+└── slices/            功能纵切面，每个含 schemas / service / router（异步流水线另含 pipeline）
 ```
-
-> 以上是**目标结构**，当前仓库里只有空目录。切片划分由团队认领时决定，
-> 见 [`app/slices/README.md`](app/slices/README.md)。
 
 **为什么按纵切面而不是 `models/ services/ api/`**：本项目的分工是「一人负责一条端到端
 链路」（ADR-0001）。技术分层会让每个功能改动横跨三个目录，PR 冲突面大；
@@ -104,14 +110,17 @@ MySQL 的唯一索引**不约束 `NULL`**。`uk(phone, deleted_at)` 里，
 
 | 组 | 内容 | 何时需要 |
 | --- | --- | --- |
-| 默认 | Web 框架、ORM、Redis、密码学、文件解析、HTTP | 总是 |
+| 默认 | Web 框架、SQLAlchemy + aiomysql、Redis、密码学、文件解析、HTTP、报告生成 | 总是 |
 | `--extra vector` | `chromadb` | M2/M3 的 AI 底座需要真实向量检索时 |
-| `--extra dev` | pytest、ruff | 开发与测试 |
+| `--extra dev` | pytest、ruff、`aiosqlite`（测试库的异步驱动） | 开发与测试 |
 
 `chromadb` **单独成组**的理由：它是唯一体积较大且带原生扩展的依赖，
 且只在 RAG 链路需要。默认装它会让"只想改认证接口"的人也被拖慢。
 
 ## 测试
+
+测试**不需要** MySQL / Redis：数据库跑 SQLite（`aiosqlite`），
+刷新令牌 / 幂等缓存 / 限流计数用进程内替身。
 
 ```powershell
 uv run pytest              # 全部

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing, to_iso
 from app.core.config import get_settings
@@ -55,7 +55,7 @@ def _verify_code_ok(code: str) -> bool:
     return code == _DEV_FIXED_CODE
 
 
-def register(db: Session, payload: RegisterRequest) -> str:
+async def register(db: AsyncSession, payload: RegisterRequest) -> str:
     """注册。返回 user_id（字符串，见 05-接口设计 §3.4）。"""
     if not _verify_code_ok(payload.verify_code):
         raise BusinessError(
@@ -66,7 +66,7 @@ def register(db: Session, payload: RegisterRequest) -> str:
 
     # 唯一性先在应用层查一次，给出**字段级**错误；数据库唯一索引仍是最终防线
     if payload.phone:
-        exists = db.scalar(select(User.id).where(User.phone == payload.phone))
+        exists = await db.scalar(select(User.id).where(User.phone == payload.phone))
         if exists:
             raise BusinessError(
                 ErrorCode.PHONE_TAKEN,
@@ -74,7 +74,7 @@ def register(db: Session, payload: RegisterRequest) -> str:
                 field_errors=[FieldError(field="phone", reason="该手机号已被注册")],
             )
     if payload.email:
-        exists = db.scalar(select(User.id).where(User.email == payload.email))
+        exists = await db.scalar(select(User.id).where(User.email == payload.email))
         if exists:
             raise BusinessError(
                 ErrorCode.EMAIL_TAKEN,
@@ -88,21 +88,21 @@ def register(db: Session, payload: RegisterRequest) -> str:
         password_hash=hash_password(payload.password),
     )
     db.add(user)
-    db.flush()
+    await db.flush()
     # 资料行随之建立，使 A-06 更新时不需再判"是否存在"
     db.add(UserProfile(user_id=user.id))
-    db.flush()
+    await db.flush()
     return str(user.id)
 
 
-def login(db: Session, payload: LoginRequest) -> LoginData:
+async def login(db: AsyncSession, payload: LoginRequest) -> LoginData:
     """登录。
 
     ⚠️ **失败时一律返回 40903，不区分"账号不存在"与"密码错误"**（05-接口设计 §5.2）：
     区分这两者等于给攻击者一个枚举已注册账号的接口。
     """
     account = payload.account.strip()
-    user = db.scalar(select(User).where((User.phone == account) | (User.email == account)))
+    user = await db.scalar(select(User).where((User.phone == account) | (User.email == account)))
 
     if user is None or not verify_password(payload.password, user.password_hash):
         raise BusinessError(ErrorCode.BAD_CREDENTIALS, "账号或密码错误")
@@ -111,28 +111,28 @@ def login(db: Session, payload: LoginRequest) -> LoginData:
         raise BusinessError(ErrorCode.ACCOUNT_DISABLED, "账号已被停用")
 
     user.last_login_at = now_beijing()
-    db.flush()
-    return _issue_tokens(user.id)
+    await db.flush()
+    return await _issue_tokens(user.id)
 
 
-def refresh(payload_token: str) -> LoginData:
+async def refresh(payload_token: str) -> LoginData:
     """刷新令牌。
 
     轮换语义：`consume_refresh_token` 一次性消费旧令牌，随后签发新的
     —— 旧令牌被盗用后的可用窗口因此缩短，异常刷新也可被检测（05-接口设计 §4.2）。
     """
-    user_id = consume_refresh_token(payload_token)
-    return _issue_tokens(user_id)
+    user_id = await consume_refresh_token(payload_token)
+    return await _issue_tokens(user_id)
 
 
-def logout(payload_token: str) -> None:
-    revoke_refresh_token(payload_token)
+async def logout(payload_token: str) -> None:
+    await revoke_refresh_token(payload_token)
 
 
-def _issue_tokens(user_id: int) -> LoginData:
+async def _issue_tokens(user_id: int) -> LoginData:
     access_token, expires_in = create_access_token(user_id)
     refresh_token = new_refresh_token()
-    store_refresh_token(user_id, refresh_token)
+    await store_refresh_token(user_id, refresh_token)
     return LoginData(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -140,13 +140,13 @@ def _issue_tokens(user_id: int) -> LoginData:
     )
 
 
-def get_user_data(db: Session, user_id: int) -> UserData:
+async def get_user_data(db: AsyncSession, user_id: int) -> UserData:
     """当前用户信息。手机号与邮箱脱敏后返回。"""
-    user = db.get(User, user_id)
+    user = await db.get(User, user_id)
     if user is None:
         raise BusinessError(ErrorCode.ACCESS_TOKEN_INVALID, "访问令牌无效或已过期")
 
-    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    profile = await db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
     return UserData(
         id=str(user.id),
         phone=mask_phone(user.phone),
@@ -167,9 +167,9 @@ def get_user_data(db: Session, user_id: int) -> UserData:
     )
 
 
-def update_profile(db: Session, user_id: int, payload: UpdateProfileRequest) -> UserData:
+async def update_profile(db: AsyncSession, user_id: int, payload: UpdateProfileRequest) -> UserData:
     """更新资料。仅写入请求中显式给出的字段（`None` 表示"不改"）。"""
-    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    profile = await db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
     if profile is None:
         profile = UserProfile(user_id=user_id)
         db.add(profile)
@@ -179,5 +179,5 @@ def update_profile(db: Session, user_id: int, payload: UpdateProfileRequest) -> 
         if value is not None:
             setattr(profile, field, value)
 
-    db.flush()
-    return get_user_data(db, user_id)
+    await db.flush()
+    return await get_user_data(db, user_id)

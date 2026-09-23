@@ -56,6 +56,44 @@ def test_unknown_route_uses_envelope(client: TestClient) -> None:
     assert body["code"] != 0
 
 
+def test_unknown_route_uses_the_generic_404_code(client: TestClient) -> None:
+    """未匹配路由必须是 `40400`（资源不存在），**不能**复用某个资源的专属码。
+
+    若复用 `40401`（审查任务不存在），前端在"任务详情页"之外的场景收到它时
+    会给出与上下文无关的提示；排查时也会误以为审查模块出了问题。
+    """
+    body = client.get("/api/v1/definitely-not-a-route").json()
+    assert body["code"] == int(ErrorCode.RESOURCE_NOT_FOUND)
+
+
+def test_method_not_allowed_keeps_its_own_code(client: TestClient) -> None:
+    """方法与路径不匹配是 40500 + HTTP 405。
+
+    ⚠️ 不能落到 `50000`：前端以 `code` 为准，会把"用错方法"显示成
+    "服务器内部错误"，把客户端问题伪装成服务端故障。
+    """
+    resp = client.post("/api/v1/health")  # /health 只允许 GET
+
+    assert resp.status_code == 405
+    assert resp.json()["code"] == int(ErrorCode.METHOD_NOT_ALLOWED)
+
+
+def test_malformed_json_has_its_own_code(client: TestClient) -> None:
+    """JSON 解析失败是 `40002`，与字段校验失败（`40001`）区分（05-接口设计 §3.3）。
+
+    FastAPI 会把 `JSONDecodeError` 也包成 `RequestValidationError`，
+    若不显式分流，畸形的请求体会被报成"字段格式不正确"。
+    """
+    resp = client.post(
+        "/api/v1/auth/login",
+        content='{"account": "13800000001", ',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == int(ErrorCode.BODY_MALFORMED)
+
+
 def test_validation_error_uses_field_level_details(client: TestClient) -> None:
     """参数校验失败必须给**字段级**原因，前端才能高亮具体表单项。"""
     resp = client.post(
@@ -78,9 +116,12 @@ def test_validation_error_uses_field_level_details(client: TestClient) -> None:
 def test_error_code_to_http_status_mapping() -> None:
     """错误码段 → HTTP 状态码的映射必须与《05》§3.3 一致。"""
     assert http_status_for(ErrorCode.PARAM_INVALID) == 400
+    assert http_status_for(ErrorCode.BODY_MALFORMED) == 400
     assert http_status_for(ErrorCode.ACCESS_TOKEN_INVALID) == 401
     assert http_status_for(ErrorCode.FORBIDDEN) == 403
+    assert http_status_for(ErrorCode.RESOURCE_NOT_FOUND) == 404
     assert http_status_for(ErrorCode.REVIEW_NOT_FOUND) == 404
+    assert http_status_for(ErrorCode.METHOD_NOT_ALLOWED) == 405
     assert http_status_for(ErrorCode.PHONE_TAKEN) == 409
     assert http_status_for(ErrorCode.FILE_TOO_LARGE) == 413
     assert http_status_for(ErrorCode.UNSUPPORTED_FILE_TYPE) == 415

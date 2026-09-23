@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import CurrentUserId, RateLimitedRead, RequestId, get_db
 from app.core.errors import ApiResponse
@@ -18,11 +18,11 @@ from app.slices.files.schemas import FileData, UploadFileData
 
 router = APIRouter(tags=["文件"])
 
-DbSession = Annotated[Session, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
-# ⚠️ 必须是 `async def`：读取上传内容用的是 `await upload.read()`。
-# 写成同步 `def`（FastAPI 会放进线程池执行）会导致读取失败。
+# ⚠️ 必须是 `async def`：读取上传内容用的是 `await upload.read()`，
+# 且数据库是异步栈（`AsyncSession`）。
 @router.post(
     "/files",
     response_model=ApiResponse[UploadFileData],
@@ -37,13 +37,13 @@ async def upload_file(
     _rate: RateLimitedRead,
 ) -> ApiResponse[UploadFileData]:
     data = await service.read_upload(file)
-    result = service.save_upload(
+    result = await service.save_upload(
         db,
         user_id=user_id,
         original_name=file.filename,
         data=data,
     )
-    db.commit()
+    await db.commit()
     return ApiResponse.ok(result, request_id=rid)
 
 
@@ -52,11 +52,12 @@ async def upload_file(
     response_model=ApiResponse[FileData],
     summary="B-02 获取文件元数据",
 )
-def get_file(
+async def get_file(
     file_id: int,
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[FileData]:
-    return ApiResponse.ok(service.get_file_meta(db, user_id=user_id, file_id=file_id), request_id=rid)
+    data = await service.get_file_meta(db, user_id=user_id, file_id=file_id)
+    return ApiResponse.ok(data, request_id=rid)

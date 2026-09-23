@@ -1,6 +1,6 @@
 """问答生成流水线（异步）。
 
-⚠️ 约定与其它流水线相同：**同步函数**、由 `BackgroundTasks` 放进线程池、
+⚠️ 约定与其它流水线相同：**异步函数**、由 `BackgroundTasks` 调度、
 只调用 `app/infra/*` 的封装，不实现任何 AI 能力。
 
 ⚠️ **`qa_message` 没有状态列与错误列**（见 04-数据库设计 §5.14，消息表只增不改）。
@@ -15,7 +15,7 @@ import logging
 import time
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
 from app.core.config import get_settings
@@ -34,62 +34,60 @@ _settings = get_settings()
 _GENERATION_FAILED = "回答生成失败，请稍后重试。"
 
 
-def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
+async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
     """生成 assistant 消息的内容与引用。**异常一律写进消息内容**，不向外抛。"""
-    db = SessionLocal()
-    # ⚠️ 并发闸门：必须在第一次用数据库之前取得（见 review/pipeline.py 的同处说明）
-    if not pipeline_gate.acquire():
-        _write_failure(db, message_id, "服务繁忙，请稍后重试")
-        db.close()
-        return
-    try:
-        message = db.get(QaMessage, message_id)
-        session = db.get(QaSession, session_id)
-        if message is None or session is None:
-            logger.warning("消息 %s 或会话 %s 不存在，跳过生成", message_id, session_id)
+    async with SessionLocal() as db:
+        # ⚠️ 并发闸门：必须在第一次用数据库之前取得（见 review/pipeline.py 的同处说明）
+        if not await pipeline_gate.acquire():
+            await _write_failure(db, message_id, "服务繁忙，请稍后重试")
             return
+        try:
+            message = await db.get(QaMessage, message_id)
+            session = await db.get(QaSession, session_id)
+            if message is None or session is None:
+                logger.warning("消息 %s 或会话 %s 不存在，跳过生成", message_id, session_id)
+                return
 
-        question = _load_question(db, session_id=session_id, before_message_id=message_id)
-        if question is None:
-            _write_failure(db, message, "未找到对应的提问，无法生成回答。")
-            return
+            question = await _load_question(db, session_id=session_id, before_message_id=message_id)
+            if question is None:
+                await _write_failure(db, message, "未找到对应的提问，无法生成回答。")
+                return
 
-        started = time.perf_counter()
-        context, candidates = _build_context(db, question)
-        result = llm.complete_structured(
-            prompts.QA_SYSTEM,
-            prompts.QA_USER_TEMPLATE.format(context=context, question=question),
-            prompts.QA_SCHEMA,
-        )
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+            started = time.perf_counter()
+            context, candidates = await _build_context(db, question)
+            result = llm.complete_structured(
+                prompts.QA_SYSTEM,
+                prompts.QA_USER_TEMPLATE.format(context=context, question=question),
+                prompts.QA_SCHEMA,
+            )
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-        answer = str(result.get("answer") or "").strip()
-        if not answer:
-            raise BusinessError(ErrorCode.LLM_BAD_RESPONSE, "模型未返回回答内容")
+            answer = str(result.get("answer") or "").strip()
+            if not answer:
+                raise BusinessError(ErrorCode.LLM_BAD_RESPONSE, "模型未返回回答内容")
 
-        citations = _record_citations(
-            db, message=message, used=result.get("used_indexes"), candidates=candidates
-        )
-        message.content = answer
-        message.has_citation = bool(citations)
-        message.model_name = _settings.llm_model
-        message.latency_ms = elapsed_ms
-        db.commit()
-        logger.info("消息 %s 生成完成，引用 %d 条，耗时 %dms", message_id, len(citations), elapsed_ms)
+            citations = _record_citations(
+                db, message=message, used=result.get("used_indexes"), candidates=candidates
+            )
+            message.content = answer
+            message.has_citation = bool(citations)
+            message.model_name = _settings.llm_model
+            message.latency_ms = elapsed_ms
+            await db.commit()
+            logger.info("消息 %s 生成完成，引用 %d 条，耗时 %dms", message_id, len(citations), elapsed_ms)
 
-    except BusinessError as exc:
-        _write_failure(db, message_id, str(exc.message))
-    except Exception:
-        logger.exception("消息 %s 生成失败", message_id)
-        _write_failure(db, message_id, _GENERATION_FAILED)
-    finally:
-        db.close()
-        pipeline_gate.release()
+        except BusinessError as exc:
+            await _write_failure(db, message_id, str(exc.message))
+        except Exception:
+            logger.exception("消息 %s 生成失败", message_id)
+            await _write_failure(db, message_id, _GENERATION_FAILED)
+        finally:
+            pipeline_gate.release()
 
 
-def _load_question(db: Session, *, session_id: int, before_message_id: int) -> str | None:
+async def _load_question(db: AsyncSession, *, session_id: int, before_message_id: int) -> str | None:
     """取该 assistant 消息之前最近的一条 user 消息作为提问。"""
-    return db.scalar(
+    return await db.scalar(
         select(QaMessage.content)
         .where(
             QaMessage.qa_session_id == session_id,
@@ -101,7 +99,7 @@ def _load_question(db: Session, *, session_id: int, before_message_id: int) -> s
     )
 
 
-def _build_context(db: Session, question: str) -> tuple[str, list[dict]]:
+async def _build_context(db: AsyncSession, question: str) -> tuple[str, list[dict]]:
     """检索法条片段并拼成上下文。
 
     返回 (上下文文本, 候选列表)。候选列表的 `index` 与提示词里片段序号一一对应，
@@ -112,11 +110,16 @@ def _build_context(db: Session, question: str) -> tuple[str, list[dict]]:
         return "（未检索到相关法条）", []
 
     chunk_ids = [int(hit.chunk_id) for hit in hits if hit.chunk_id.isdigit()]
-    chunks = {chunk.id: chunk for chunk in db.scalars(select(KbChunk).where(KbChunk.id.in_(chunk_ids))).all()}
+    chunks = {
+        chunk.id: chunk
+        for chunk in (await db.execute(select(KbChunk).where(KbChunk.id.in_(chunk_ids)))).scalars().all()
+    }
     document_ids = {chunk.kb_document_id for chunk in chunks.values()}
     documents = {
         document.id: document
-        for document in db.scalars(select(KbDocument).where(KbDocument.id.in_(document_ids))).all()
+        for document in (await db.execute(select(KbDocument).where(KbDocument.id.in_(document_ids))))
+        .scalars()
+        .all()
     }
 
     candidates: list[dict] = []
@@ -153,7 +156,7 @@ def _build_context(db: Session, question: str) -> tuple[str, list[dict]]:
 
 
 def _record_citations(
-    db: Session, *, message: QaMessage, used: object, candidates: list[dict]
+    db: AsyncSession, *, message: QaMessage, used: object, candidates: list[dict]
 ) -> list[QaCitation]:
     """按模型回报的片段序号建立引用记录。
 
@@ -190,16 +193,17 @@ def _record_citations(
     return citations
 
 
-def _write_failure(db: Session, message: QaMessage | int, reason: str) -> None:
+async def _write_failure(db: AsyncSession, message: QaMessage | int, reason: str) -> None:
     """把失败写进消息内容。**`qa_message` 没有状态列，这是唯一的记录方式。**"""
+    message_id = message if isinstance(message, int) else message.id
     try:
-        db.rollback()
-        target = db.get(QaMessage, message) if isinstance(message, int) else message
+        await db.rollback()
+        target = await db.get(QaMessage, message_id)
         if target is None:
             return
         target.content = _GENERATION_FAILED if reason == _GENERATION_FAILED else f"回答生成失败：{reason}"
         target.has_citation = False
         target.created_at = target.created_at or now_beijing()
-        db.commit()
+        await db.commit()
     except Exception:
         logger.exception("写入回答失败状态时又出错了")

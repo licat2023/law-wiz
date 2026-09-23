@@ -38,9 +38,9 @@ _LIMIT_ATTR = {
 }
 
 
-def _check(category: str, subject: str, request: Request, response: Response) -> None:
+async def _check(category: str, subject: str, request: Request, response: Response) -> None:
     limit = getattr(_settings, _LIMIT_ATTR[category])
-    allowed, remaining, reset_at = ratelimit.hit(category, subject, limit)
+    allowed, remaining, reset_at = await ratelimit.hit(category, subject, limit)
     _remember(request, response, limit, remaining, reset_at)
     if not allowed:
         raise BusinessError(ErrorCode.RATE_LIMITED, "请求过于频繁，请稍后重试")
@@ -89,8 +89,8 @@ class _UserRateLimit:
     def __init__(self, category: str) -> None:
         self._category = category
 
-    def __call__(self, request: Request, response: Response, user_id: CurrentUserId) -> None:
-        _check(self._category, f"u{user_id}", request, response)
+    async def __call__(self, request: Request, response: Response, user_id: CurrentUserId) -> None:
+        await _check(self._category, f"u{user_id}", request, response)
 
 
 class _IpRateLimit:
@@ -99,8 +99,8 @@ class _IpRateLimit:
     def __init__(self, category: str) -> None:
         self._category = category
 
-    def __call__(self, request: Request, response: Response) -> None:
-        _check(self._category, f"ip{_client_ip(request)}", request, response)
+    async def __call__(self, request: Request, response: Response) -> None:
+        await _check(self._category, f"ip{_client_ip(request)}", request, response)
 
 
 RateLimitedAuth = Annotated[None, Depends(_IpRateLimit("auth"))]

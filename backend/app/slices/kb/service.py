@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import to_iso
 from app.core.errors import BusinessError, ErrorCode
@@ -37,10 +37,11 @@ _SORT_OPTIONS = {
 }
 
 
-def _chunk_count(db: Session, document_id: int) -> int:
-    return (
-        db.scalar(select(func.count()).select_from(KbChunk).where(KbChunk.kb_document_id == document_id)) or 0
+async def _chunk_count(db: AsyncSession, document_id: int) -> int:
+    count = await db.scalar(
+        select(func.count()).select_from(KbChunk).where(KbChunk.kb_document_id == document_id)
     )
+    return count or 0
 
 
 # ============================================================
@@ -48,7 +49,7 @@ def _chunk_count(db: Session, document_id: int) -> int:
 # ============================================================
 
 
-def create_document(db: Session, payload: CreateDocumentRequest) -> DocumentCreatedData:
+async def create_document(db: AsyncSession, payload: CreateDocumentRequest) -> DocumentCreatedData:
     """创建语料，**并立即切分落块**。
 
     切分放在这里而不是索引阶段，是因为 `kb_document` 不存全文 ——
@@ -57,7 +58,7 @@ def create_document(db: Session, payload: CreateDocumentRequest) -> DocumentCrea
     content = payload.content
     digest = sha256_of(content.encode("utf-8"))
 
-    existing = db.scalar(
+    existing = await db.scalar(
         select(KbDocument.id).where(KbDocument.content_hash == digest, KbDocument.deleted_at.is_(None))
     )
     if existing is not None:
@@ -80,7 +81,7 @@ def create_document(db: Session, payload: CreateDocumentRequest) -> DocumentCrea
         index_status=STATUS_PENDING,
     )
     db.add(document)
-    db.flush()
+    await db.flush()
 
     chunks = chunking.split_into_chunks(content)
     # 分块冗余 `law_name` / `effective_date` 是**刻意的反范式**（04-数据库设计 §5.10）：
@@ -99,7 +100,7 @@ def create_document(db: Session, payload: CreateDocumentRequest) -> DocumentCrea
                 char_end=chunk.char_end,
             )
         )
-    db.flush()
+    await db.flush()
 
     return DocumentCreatedData(
         document_id=str(document.id),
@@ -115,15 +116,15 @@ def create_document(db: Session, payload: CreateDocumentRequest) -> DocumentCrea
 # ============================================================
 
 
-def trigger_index(db: Session, *, document_id: int, force: bool) -> IndexTriggeredData:
-    document = _load_document(db, document_id)
+async def trigger_index(db: AsyncSession, *, document_id: int, force: bool) -> IndexTriggeredData:
+    document = await _load_document(db, document_id)
 
     if not force and document.index_status == "indexing":
         # 已在索引中且未要求强制重建：原样返回当前状态，不重复触发
         return _to_triggered(document)
 
     document.index_status = STATUS_PENDING
-    db.flush()
+    await db.flush()
     return _to_triggered(document)
 
 
@@ -136,12 +137,12 @@ def _to_triggered(document: KbDocument) -> IndexTriggeredData:
     )
 
 
-def enqueue(document_id: int) -> None:
+async def enqueue(document_id: int) -> None:
     """登记并执行索引任务。
 
     单独成函数是为了**让测试可以替换它** —— 测试里不应真的跑向量化。
     """
-    run_index_pipeline(document_id)
+    await run_index_pipeline(document_id)
 
 
 # ============================================================
@@ -149,8 +150,8 @@ def enqueue(document_id: int) -> None:
 # ============================================================
 
 
-def list_documents(
-    db: Session,
+async def list_documents(
+    db: AsyncSession,
     *,
     page: int,
     page_size: int,
@@ -178,19 +179,25 @@ def list_documents(
     if law_name:
         conditions.append(KbDocument.law_name.like(f"%{law_name}%"))
 
-    total = db.scalar(select(func.count()).select_from(KbDocument).where(*conditions)) or 0
-    documents = db.scalars(
-        select(KbDocument)
-        .where(*conditions)
-        .order_by(order_by)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
+    total = await db.scalar(select(func.count()).select_from(KbDocument).where(*conditions)) or 0
+    documents = (
+        (
+            await db.execute(
+                select(KbDocument)
+                .where(*conditions)
+                .order_by(order_by)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    return [_to_list_item(db, doc) for doc in documents], int(total)
+    return [await _to_list_item(db, doc) for doc in documents], int(total)
 
 
-def _to_list_item(db: Session, document: KbDocument) -> DocumentListItem:
+async def _to_list_item(db: AsyncSession, document: KbDocument) -> DocumentListItem:
     return DocumentListItem(
         document_id=str(document.id),
         doc_type=document.doc_type,
@@ -200,7 +207,7 @@ def _to_list_item(db: Session, document: KbDocument) -> DocumentListItem:
         article_no=document.article_no,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
         index_status=document.index_status,
-        chunk_count=_chunk_count(db, document.id),
+        chunk_count=await _chunk_count(db, document.id),
         created_at=to_iso(document.created_at) or "",
     )
 
@@ -210,11 +217,17 @@ def _to_list_item(db: Session, document: KbDocument) -> DocumentListItem:
 # ============================================================
 
 
-def get_document(db: Session, document_id: int) -> DocumentDetailData:
-    document = _load_document(db, document_id)
-    chunks = db.scalars(
-        select(KbChunk).where(KbChunk.kb_document_id == document.id).order_by(KbChunk.chunk_no)
-    ).all()
+async def get_document(db: AsyncSession, document_id: int) -> DocumentDetailData:
+    document = await _load_document(db, document_id)
+    chunks = (
+        (
+            await db.execute(
+                select(KbChunk).where(KbChunk.kb_document_id == document.id).order_by(KbChunk.chunk_no)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return DocumentDetailData(
         document_id=str(document.id),
@@ -252,8 +265,8 @@ def get_document(db: Session, document_id: int) -> DocumentDetailData:
     )
 
 
-def _load_document(db: Session, document_id: int) -> KbDocument:
-    document = db.get(KbDocument, document_id)
+async def _load_document(db: AsyncSession, document_id: int) -> KbDocument:
+    document = await db.get(KbDocument, document_id)
     if document is None or document.deleted_at is not None:
         raise BusinessError(ErrorCode.KB_DOC_NOT_FOUND, "语料不存在")
     return document
@@ -264,8 +277,8 @@ def _load_document(db: Session, document_id: int) -> KbDocument:
 # ============================================================
 
 
-def search(
-    db: Session,
+async def search(
+    db: AsyncSession,
     *,
     query: str,
     top_k: int,
@@ -286,11 +299,16 @@ def search(
         return KbSearchData(query=query, items=[])
 
     chunk_ids = [int(hit.chunk_id) for hit in hits if hit.chunk_id.isdigit()]
-    chunks = {chunk.id: chunk for chunk in db.scalars(select(KbChunk).where(KbChunk.id.in_(chunk_ids))).all()}
+    chunks = {
+        chunk.id: chunk
+        for chunk in (await db.execute(select(KbChunk).where(KbChunk.id.in_(chunk_ids)))).scalars().all()
+    }
     document_ids = {chunk.kb_document_id for chunk in chunks.values()}
     documents = {
         document.id: document
-        for document in db.scalars(select(KbDocument).where(KbDocument.id.in_(document_ids))).all()
+        for document in (await db.execute(select(KbDocument).where(KbDocument.id.in_(document_ids))))
+        .scalars()
+        .all()
     }
 
     items: list[KbSearchItem] = []

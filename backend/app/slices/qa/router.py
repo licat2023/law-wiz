@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import (
     CurrentUserId,
@@ -34,7 +34,7 @@ from app.slices.qa.schemas import (
 
 router = APIRouter(tags=["法律问答"])
 
-DbSession = Annotated[Session, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 @router.post(
@@ -43,15 +43,15 @@ DbSession = Annotated[Session, Depends(get_db)]
     status_code=status.HTTP_201_CREATED,
     summary="E-01 创建问答会话",
 )
-def create_session(
+async def create_session(
     payload: CreateSessionRequest,
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[SessionData]:
-    data = service.create_session(db, user_id=user_id, payload=payload)
-    db.commit()
+    data = await service.create_session(db, user_id=user_id, payload=payload)
+    await db.commit()
     return ApiResponse.ok(data, request_id=rid)
 
 
@@ -60,7 +60,7 @@ def create_session(
     response_model=ApiResponse[Page[SessionListItem]],
     summary="E-02 会话列表",
 )
-def list_sessions(
+async def list_sessions(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
@@ -70,7 +70,7 @@ def list_sessions(
     status_filter: str | None = Query(None, alias="status"),
     sort: str = Query("-last_message_at"),
 ) -> ApiResponse[Page[SessionListItem]]:
-    items, total = service.list_sessions(
+    items, total = await service.list_sessions(
         db,
         user_id=user_id,
         page=page,
@@ -86,7 +86,7 @@ def list_sessions(
     response_model=ApiResponse[SessionDetailData],
     summary="E-03 会话详情（含消息与引用）",
 )
-def get_session(
+async def get_session(
     session_id: int,
     db: DbSession,
     user_id: CurrentUserId,
@@ -95,7 +95,9 @@ def get_session(
     page: int = Query(1),
     page_size: int = Query(20),
 ) -> ApiResponse[SessionDetailData]:
-    data = service.get_session(db, user_id=user_id, session_id=session_id, page=page, page_size=page_size)
+    data = await service.get_session(
+        db, user_id=user_id, session_id=session_id, page=page, page_size=page_size
+    )
     return ApiResponse.ok(data, request_id=rid)
 
 
@@ -105,7 +107,7 @@ def get_session(
     status_code=status.HTTP_202_ACCEPTED,
     summary="E-04 提问（异步）",
 )
-def ask(
+async def ask(
     session_id: int,
     payload: AskRequest,
     background: BackgroundTasks,
@@ -116,19 +118,19 @@ def ask(
     _rate: RateLimitedAI,
 ) -> ApiResponse[AskData]:
     # 同一 Idempotency-Key 在 24 小时内重复提交，返回首次结果而不重复提问（§3.5）
-    cached = idempotency.load(idempotency_key)
+    cached = await idempotency.load("qa", idempotency_key)
     if cached is not None:
         return ApiResponse.ok(AskData(**cached), request_id=rid)
 
-    data = service.ask(db, user_id=user_id, session_id=session_id, content=payload.content)
-    db.commit()
-    # 立即返回两个消息 ID，回答由后台线程生成（03-概要设计 §5.1）
+    data = await service.ask(db, user_id=user_id, session_id=session_id, content=payload.content)
+    await db.commit()
+    # 立即返回两个消息 ID，回答由后台任务生成（03-概要设计 §5.1）
     background.add_task(
         service.enqueue,
         message_id=int(data.assistant_message_id),
         session_id=session_id,
     )
-    idempotency.save(idempotency_key, data.model_dump())
+    await idempotency.save("qa", idempotency_key, data.model_dump())
     return ApiResponse.ok(data, request_id=rid)
 
 
@@ -137,13 +139,13 @@ def ask(
     response_model=ApiResponse[None],
     summary="E-05 归档会话",
 )
-def archive_session(
+async def archive_session(
     session_id: int,
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[None]:
-    service.archive(db, user_id=user_id, session_id=session_id)
-    db.commit()
+    await service.archive(db, user_id=user_id, session_id=session_id)
+    await db.commit()
     return ApiResponse.ok(None, request_id=rid)

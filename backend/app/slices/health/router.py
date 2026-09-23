@@ -23,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import RequestId, get_db
 from app.core.clock import now_beijing, to_iso
@@ -40,7 +40,7 @@ _settings = get_settings()
 # ⚠️ 时间必须经 core.clock 序列化：契约要求 ISO 8601 带时区偏移（05-接口设计 §3）
 _STARTED_AT = to_iso(now_beijing())
 
-DbSession = Annotated[Session, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 # 逐条列出的失败响应，使 503 出现在 OpenAPI 里（FastAPI 默认只写 200）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -51,7 +51,7 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _check_database(db: Session) -> str:
+async def _check_database(db: AsyncSession) -> str:
     """探测数据库。
 
     ⚠️ **异常必须记日志。** 若静默吞掉异常，`/health` 只回报
@@ -60,7 +60,7 @@ def _check_database(db: Session) -> str:
     排查具体原因时再用 `db_echo=true` 或直连数据库。
     """
     try:
-        db.execute(text("SELECT 1"))
+        await db.execute(text("SELECT 1"))
         return "ok"
     except Exception as exc:
         logger.warning(
@@ -89,9 +89,9 @@ def _check_capability(name: str, provider: str) -> str:
     summary="F-01 健康检查",
     responses=_ERROR_RESPONSES,
 )
-def health(db: DbSession, rid: RequestId, response: Response) -> ApiResponse[dict[str, Any]]:
-    db_status = _check_database(db)
-    redis_status = "ok" if redis_ping() else "unavailable"
+async def health(db: DbSession, rid: RequestId, response: Response) -> ApiResponse[dict[str, Any]]:
+    db_status = await _check_database(db)
+    redis_status = "ok" if await redis_ping() else "unavailable"
 
     components: dict[str, str] = {
         "database": db_status,

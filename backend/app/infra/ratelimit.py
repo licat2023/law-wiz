@@ -31,7 +31,7 @@ logger = logging.getLogger("lawwiz.ratelimit")
 WINDOW_SECONDS = 60
 
 
-def _incr(key: str, ttl: int) -> int | None:
+async def _incr(key: str, ttl: int) -> int | None:
     """计数 +1 并返回新值；Redis 不可用时返回 None（调用方放行）。
 
     **测试替换此函数**即可用内存字典代替 Redis —— 与 `core/idempotency.py`
@@ -41,14 +41,14 @@ def _incr(key: str, ttl: int) -> int | None:
         pipe = get_redis().pipeline()
         pipe.incr(key)
         pipe.expire(key, ttl)
-        count, _ = pipe.execute()
+        count, _ = await pipe.execute()
         return int(count)
     except RedisError as exc:
         logger.warning("限流计数失败，本次放行：%s", exc)
         return None
 
 
-def hit(category: str, subject: str, limit: int) -> tuple[bool, int, int]:
+async def hit(category: str, subject: str, limit: int) -> tuple[bool, int, int]:
     """记录一次请求。
 
     返回 `(是否放行, 剩余次数, 窗口重置的 Unix 时间戳)`。
@@ -61,7 +61,7 @@ def hit(category: str, subject: str, limit: int) -> tuple[bool, int, int]:
 
     key = f"{get_settings().redis_key_prefix}rl:{category}:{subject}:{window}"
     # TTL 略大于窗口：确保键能在窗口结束后自然消失，不依赖清理任务
-    count = _incr(key, WINDOW_SECONDS + 5)
+    count = await _incr(key, WINDOW_SECONDS + 5)
     if count is None:
         return True, limit, reset_at
 

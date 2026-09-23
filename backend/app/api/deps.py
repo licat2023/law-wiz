@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Annotated
 
@@ -21,6 +22,11 @@ REQUEST_ID_HEADER = "X-Request-ID"
 # `POST /reviews`（发起审查）、`POST /qa/sessions/{id}/messages`（发消息）。
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
+# 客户端传入的 request_id 只在**形状合法**时复用。
+# ⚠️ 必须限制字符集：该值会被回写进响应头与日志行，放任控制字符与空格
+# 等于给日志注入与响应头注入留口子（`isascii()` 挡不住 `\n`、`\x00`）。
+_REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{8,64}")
 
 
 def get_request_id(request: Request) -> str:
@@ -41,7 +47,7 @@ def get_request_id(request: Request) -> str:
         return str(existing)
 
     incoming = request.headers.get(REQUEST_ID_HEADER)
-    if incoming and len(incoming) <= 64 and incoming.isascii():
+    if incoming and _REQUEST_ID_PATTERN.fullmatch(incoming):
         return incoming
 
     generated = f"req_{uuid.uuid4().hex[:16]}"

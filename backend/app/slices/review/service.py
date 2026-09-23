@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import to_iso
 from app.core.errors import BusinessError, ErrorCode
@@ -41,14 +41,14 @@ _SORT_OPTIONS = {
 # ============================================================
 
 
-def create_task(db: Session, *, user_id: int, payload: CreateReviewRequest) -> ReviewTaskData:
-    file_object = _load_file(db, file_id=payload.file_id)
-    version = _ensure_contract_version(
+async def create_task(db: AsyncSession, *, user_id: int, payload: CreateReviewRequest) -> ReviewTaskData:
+    file_object = await _load_file(db, file_id=payload.file_id)
+    version = await _ensure_contract_version(
         db, user_id=user_id, file_object=file_object, title=payload.contract_title
     )
 
     if not payload.force:
-        running = db.scalar(
+        running = await db.scalar(
             select(ReviewTask.id).where(
                 ReviewTask.contract_version_id == version.id,
                 ReviewTask.status.in_(_ACTIVE_STATUSES),
@@ -66,11 +66,11 @@ def create_task(db: Session, *, user_id: int, payload: CreateReviewRequest) -> R
         progress=0,
     )
     db.add(task)
-    db.flush()
+    await db.flush()
     return _to_task_data(task)
 
 
-def _load_file(db: Session, *, file_id: str) -> FileObject:
+async def _load_file(db: AsyncSession, *, file_id: str) -> FileObject:
     """按 ID 取文件对象。
 
     ⚠️ **刻意不校验 `uploader_id`**，两个理由：
@@ -91,21 +91,21 @@ def _load_file(db: Session, *, file_id: str) -> FileObject:
     except (TypeError, ValueError) as exc:
         raise BusinessError(ErrorCode.PARAM_INVALID, "file_id 不合法") from exc
 
-    file_object = db.get(FileObject, numeric_id)
+    file_object = await db.get(FileObject, numeric_id)
     if file_object is None or file_object.deleted_at is not None:
         raise BusinessError(ErrorCode.FILE_NOT_FOUND, "文件不存在")
     return file_object
 
 
-def _ensure_contract_version(
-    db: Session, *, user_id: int, file_object: FileObject, title: str | None
+async def _ensure_contract_version(
+    db: AsyncSession, *, user_id: int, file_object: FileObject, title: str | None
 ) -> ContractVersion:
     """找到该文件对应的合同版本；没有就建合同与首个版本。
 
     ⚠️ `contract_version` **不可变**：重审同一文件复用同一个版本，
     而不是每次新建 —— 否则"这份报告对应哪一版文本"就说不清了。
     """
-    existing = db.scalar(
+    existing = await db.scalar(
         select(ContractVersion)
         .join(Contract, Contract.id == ContractVersion.contract_id)
         .where(ContractVersion.file_object_id == file_object.id, Contract.owner_id == user_id)
@@ -120,7 +120,7 @@ def _ensure_contract_version(
         source="upload",
     )
     db.add(contract)
-    db.flush()
+    await db.flush()
 
     version = ContractVersion(
         contract_id=contract.id,
@@ -129,19 +129,19 @@ def _ensure_contract_version(
         created_by=user_id,
     )
     db.add(version)
-    db.flush()
+    await db.flush()
     contract.current_version_id = version.id
-    db.flush()
+    await db.flush()
     return version
 
 
-def enqueue(task_id: int) -> None:
+async def enqueue(task_id: int) -> None:
     """登记并执行审后台任务。
 
     ⚠️ 单独成函数是为了**让测试可以替换它** —— 测试里不应真的跑流水线
     （那会去调用 AI 封装）。生产路径由路由层通过 `BackgroundTasks` 触发。
     """
-    run_review_pipeline(task_id)
+    await run_review_pipeline(task_id)
 
 
 # ============================================================
@@ -149,12 +149,12 @@ def enqueue(task_id: int) -> None:
 # ============================================================
 
 
-def get_task(db: Session, *, user_id: int, task_id: int) -> ReviewTaskData:
-    return _to_task_data(_load_owned_task(db, user_id=user_id, task_id=task_id))
+async def get_task(db: AsyncSession, *, user_id: int, task_id: int) -> ReviewTaskData:
+    return _to_task_data(await _load_owned_task(db, user_id=user_id, task_id=task_id))
 
 
-def _load_owned_task(db: Session, *, user_id: int, task_id: int) -> ReviewTask:
-    task = db.get(ReviewTask, task_id)
+async def _load_owned_task(db: AsyncSession, *, user_id: int, task_id: int) -> ReviewTask:
+    task = await db.get(ReviewTask, task_id)
     if task is None or task.deleted_at is not None:
         raise BusinessError(ErrorCode.REVIEW_NOT_FOUND, "审查任务不存在")
     if task.user_id != user_id:
@@ -181,15 +181,19 @@ def _to_task_data(task: ReviewTask) -> ReviewTaskData:
 # ============================================================
 
 
-def get_result(db: Session, *, user_id: int, task_id: int) -> ReviewResultData:
-    task = _load_owned_task(db, user_id=user_id, task_id=task_id)
+async def get_result(db: AsyncSession, *, user_id: int, task_id: int) -> ReviewResultData:
+    task = await _load_owned_task(db, user_id=user_id, task_id=task_id)
     _require_finished(task)
 
-    points = _load_risk_points(db, task_id=task.id)
+    points = await _load_risk_points(db, task_id=task.id)
+    # ⚠️ 异步会话下**不能靠 `task.report` 惰性加载**（会抛 MissingGreenlet），显式查询
+    report = await db.scalar(
+        select(ReviewReport).where(ReviewReport.review_task_id == task.id, ReviewReport.deleted_at.is_(None))
+    )
     return ReviewResultData(
         task_id=str(task.id),
-        contract_title=_contract_title(db, task),
-        summary=task.report.summary if task.report else None,
+        contract_title=await _contract_title(db, task),
+        summary=report.summary if report is not None else None,
         counts=_counts_from(points),
         extracted_terms=task.extracted_terms,
         risk_points=[_to_point_data(point) for point in points],
@@ -203,14 +207,13 @@ def _require_finished(task: ReviewTask) -> None:
         raise BusinessError(ErrorCode.REVIEW_NOT_FINISHED, "审查任务尚未完成")
 
 
-def _load_risk_points(db: Session, *, task_id: int) -> list[RiskPoint]:
-    return list(
-        db.scalars(
-            select(RiskPoint)
-            .where(RiskPoint.review_task_id == task_id, RiskPoint.deleted_at.is_(None))
-            .order_by(RiskPoint.id.asc())
-        ).all()
+async def _load_risk_points(db: AsyncSession, *, task_id: int) -> list[RiskPoint]:
+    stmt = (
+        select(RiskPoint)
+        .where(RiskPoint.review_task_id == task_id, RiskPoint.deleted_at.is_(None))
+        .order_by(RiskPoint.id.asc())
     )
+    return list((await db.execute(stmt)).scalars().all())
 
 
 def _counts_from(points: list[RiskPoint]) -> ReviewCounts:
@@ -243,10 +246,10 @@ def _to_point_data(point: RiskPoint) -> RiskPointData:
     )
 
 
-def _contract_title(db: Session, task: ReviewTask) -> str | None:
+async def _contract_title(db: AsyncSession, task: ReviewTask) -> str | None:
     if task.contract_id is None:
         return None
-    contract = db.get(Contract, task.contract_id)
+    contract = await db.get(Contract, task.contract_id)
     return contract.title if contract else None
 
 
@@ -255,17 +258,17 @@ def _contract_title(db: Session, task: ReviewTask) -> str | None:
 # ============================================================
 
 
-def get_report(db: Session, *, user_id: int, task_id: int) -> tuple[str, bytes]:
+async def get_report(db: AsyncSession, *, user_id: int, task_id: int) -> tuple[str, bytes]:
     """返回 (文件名, PDF 字节)。"""
-    task = _load_owned_task(db, user_id=user_id, task_id=task_id)
+    task = await _load_owned_task(db, user_id=user_id, task_id=task_id)
     _require_finished(task)
 
-    report = db.scalar(
+    report = await db.scalar(
         select(ReviewReport).where(ReviewReport.review_task_id == task.id, ReviewReport.deleted_at.is_(None))
     )
     if report is None or report.file_object_id is None:
         raise BusinessError(ErrorCode.REVIEW_NOT_FOUND, "审查报告不存在")
-    file_object = db.get(FileObject, report.file_object_id)
+    file_object = await db.get(FileObject, report.file_object_id)
     if file_object is None or file_object.deleted_at is not None:
         raise BusinessError(ErrorCode.REVIEW_NOT_FOUND, "审查报告文件不存在")
 
@@ -278,8 +281,8 @@ def get_report(db: Session, *, user_id: int, task_id: int) -> tuple[str, bytes]:
 # ============================================================
 
 
-def list_tasks(
-    db: Session,
+async def list_tasks(
+    db: AsyncSession,
     *,
     user_id: int,
     page: int,
@@ -301,21 +304,27 @@ def list_tasks(
     if status is not None:
         conditions.append(ReviewTask.status == status)
 
-    total = db.scalar(select(func.count()).select_from(ReviewTask).where(*conditions)) or 0
-    tasks = db.scalars(
-        select(ReviewTask)
-        .where(*conditions)
-        .order_by(order_by)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
+    total = await db.scalar(select(func.count()).select_from(ReviewTask).where(*conditions)) or 0
+    tasks = (
+        (
+            await db.execute(
+                select(ReviewTask)
+                .where(*conditions)
+                .order_by(order_by)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    items = [_to_list_item(db, task) for task in tasks]
+    items = [await _to_list_item(db, task) for task in tasks]
     return items, int(total)
 
 
-def _to_list_item(db: Session, task: ReviewTask) -> ReviewListItem:
-    report = db.scalar(
+async def _to_list_item(db: AsyncSession, task: ReviewTask) -> ReviewListItem:
+    report = await db.scalar(
         select(ReviewReport).where(ReviewReport.review_task_id == task.id, ReviewReport.deleted_at.is_(None))
     )
     counts = (
@@ -325,7 +334,7 @@ def _to_list_item(db: Session, task: ReviewTask) -> ReviewListItem:
     )
     return ReviewListItem(
         task_id=str(task.id),
-        contract_title=_contract_title(db, task),
+        contract_title=await _contract_title(db, task),
         status=task.status,  # type: ignore[arg-type]
         counts=counts,
         created_at=to_iso(task.created_at) or "",
@@ -338,13 +347,13 @@ def _to_list_item(db: Session, task: ReviewTask) -> ReviewListItem:
 # ============================================================
 
 
-def dismiss_risk_point(
-    db: Session, *, user_id: int, task_id: int, point_id: int, is_dismissed: bool
+async def dismiss_risk_point(
+    db: AsyncSession, *, user_id: int, task_id: int, point_id: int, is_dismissed: bool
 ) -> RiskPointData:
-    task = _load_owned_task(db, user_id=user_id, task_id=task_id)
-    point = db.get(RiskPoint, point_id)
+    task = await _load_owned_task(db, user_id=user_id, task_id=task_id)
+    point = await db.get(RiskPoint, point_id)
     if point is None or point.deleted_at is not None or point.review_task_id != task.id:
         raise BusinessError(ErrorCode.REVIEW_NOT_FOUND, "风险点不存在")
     point.is_dismissed = is_dismissed
-    db.flush()
+    await db.flush()
     return _to_point_data(point)

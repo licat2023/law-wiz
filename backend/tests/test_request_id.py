@@ -83,3 +83,25 @@ def test_error_response_uses_same_request_id_as_header(client: TestClient) -> No
 
     resp2 = client.get("/api/v1/definitely-not-a-route")  # 404
     assert resp2.headers.get("X-Request-ID") == resp2.json()["request_id"]
+
+
+def test_response_falls_back_to_the_request_context() -> None:
+    """忘记注入 `RequestId` 依赖时，响应体也不得是空串。
+
+    这是**兜底**：路由漏注入不是"少一个字段"，而是用户凭响应体里的号
+    查不到任何日志（参见本文件开头的历史说明）。中间件把号绑进 ContextVar 后，
+    `ApiResponse` 的默认值就能取到它。
+    """
+    from app.core.context import bind_request_id, reset_request_id
+    from app.core.errors import ApiResponse, ErrorCode
+
+    assert ApiResponse.ok(None).request_id == "", "请求上下文之外应为空串"
+
+    token = bind_request_id("req_abcdef01")
+    try:
+        assert ApiResponse.ok(None).request_id == "req_abcdef01"
+        assert ApiResponse.fail(ErrorCode.INTERNAL_ERROR, "出错了").request_id == "req_abcdef01"
+    finally:
+        reset_request_id(token)
+
+    assert ApiResponse.ok(None).request_id == "", "还原后不应再泄漏上一个请求的号"

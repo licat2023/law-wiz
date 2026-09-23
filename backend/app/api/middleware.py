@@ -20,6 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.deps import REQUEST_ID_HEADER, get_request_id
 from app.core.config import get_settings
+from app.core.context import bind_request_id, reset_request_id
 from app.core.errors import ApiResponse, ErrorCode, http_status_for
 
 logger = logging.getLogger("lawwiz.access")
@@ -114,6 +115,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         request_id = get_request_id(request)
         request.state.request_id = request_id
+        # 同时绑定到 ContextVar：响应体（ApiResponse）的兜底取号依赖它，
+        # 这样忘记注入 `RequestId` 的路由也不会返回空 request_id。
+        token = bind_request_id(request_id)
 
         started = time.perf_counter()
         try:
@@ -128,6 +132,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 request_id,
             )
             raise
+        finally:
+            reset_request_id(token)
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         response.headers[REQUEST_ID_HEADER] = request_id

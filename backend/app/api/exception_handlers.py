@@ -47,6 +47,20 @@ def register_exception_handlers(app: FastAPI) -> None:
         `loc` 形如 `("body", "phone")`，需剥掉首段的来源标记只留字段名，
         否则前端拿到的 field 是 `body.phone`，无法与表单字段对应。
         """
+        # ⚠️ **JSON 解析失败必须与字段校验失败区分开**：契约里它们是两个码
+        # （05-接口设计 §3.3：40002 请求体格式错误 / 40001 参数校验失败）。
+        # FastAPI 会把 `json.JSONDecodeError` 也包成 RequestValidationError，
+        # 若不在此分流，畸形的请求体会被当成"字段格式不正确"，误导前端。
+        if any(err.get("type") == "json_invalid" for err in exc.errors()):
+            return JSONResponse(
+                status_code=http_status_for(ErrorCode.BODY_MALFORMED),
+                content=ApiResponse.fail(
+                    ErrorCode.BODY_MALFORMED,
+                    "请求体格式错误",
+                    request_id=_request_id(request),
+                ).model_dump(),
+            )
+
         field_errors: list[FieldError] = []
         for err in exc.errors():
             loc = [str(p) for p in err.get("loc", ()) if p not in ("body", "query", "path")]
@@ -65,18 +79,44 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        """框架级 HTTP 异常（404 路由不存在、405 方法不允许等）。"""
+        """框架级 HTTP 异常（404 路由不存在、405 方法不允许等）。
+
+        ⚠️ 映射必须保持"**码段与 HTTP 状态一致**"：
+        - 未匹配路由 = 40400（资源不存在），**不能**复用 `40401`（那是"审查任务不存在"，
+          会让前端在任务列表页显示"任务不存在"）；
+        - 方法不匹配 = 40500，**不能**落到 `50000` —— 前端按 code 判断时会把
+          用错方法的请求显示成"服务器内部错误"，掩盖真实原因。
+        """
         mapped = {
             401: ErrorCode.ACCESS_TOKEN_INVALID,
             403: ErrorCode.FORBIDDEN,
-            404: ErrorCode.REVIEW_NOT_FOUND,
+            404: ErrorCode.RESOURCE_NOT_FOUND,
+            405: ErrorCode.METHOD_NOT_ALLOWED,
             429: ErrorCode.RATE_LIMITED,
-        }.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
+        }.get(exc.status_code)
 
-        message = exc.detail if isinstance(exc.detail, str) and exc.detail else "请求失败"
+        if mapped is None:
+            logger.warning(
+                "未映射的框架级 HTTP 异常：status=%s detail=%s request_id=%s",
+                exc.status_code,
+                exc.detail,
+                _request_id(request),
+            )
+            mapped = ErrorCode.INTERNAL_ERROR
+
+        # message 面向用户展示，统一给中文；不透传框架的英文 detail
+        message = {
+            ErrorCode.ACCESS_TOKEN_INVALID: "访问令牌无效或已过期",
+            ErrorCode.FORBIDDEN: "无权访问该资源",
+            ErrorCode.RESOURCE_NOT_FOUND: "请求的资源不存在",
+            ErrorCode.METHOD_NOT_ALLOWED: "请求方法不被允许",
+            ErrorCode.RATE_LIMITED: "请求过于频繁，请稍后重试",
+            ErrorCode.INTERNAL_ERROR: "服务器内部错误",
+        }[mapped]
         return JSONResponse(
             status_code=exc.status_code,
             content=ApiResponse.fail(mapped, message, request_id=_request_id(request)).model_dump(),
+            headers=getattr(exc, "headers", None),
         )
 
     @app.exception_handler(Exception)

@@ -9,11 +9,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import (
     CurrentUserId,
@@ -38,7 +38,7 @@ from app.slices.review.schemas import (
 
 router = APIRouter(tags=["合同审查"])
 
-DbSession = Annotated[Session, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 @router.post(
@@ -47,7 +47,7 @@ DbSession = Annotated[Session, Depends(get_db)]
     status_code=status.HTTP_202_ACCEPTED,
     summary="C-01 发起合同审查（异步）",
 )
-def create_review(
+async def create_review(
     payload: CreateReviewRequest,
     background: BackgroundTasks,
     db: DbSession,
@@ -57,15 +57,15 @@ def create_review(
     _rate: RateLimitedAI,
 ) -> ApiResponse[ReviewTaskData]:
     # 同一 Idempotency-Key 在 24 小时内重复提交，返回首次结果而不重复创建（§3.5）
-    cached = idempotency.load(idempotency_key)
+    cached = await idempotency.load("review", idempotency_key)
     if cached is not None:
         return ApiResponse.ok(ReviewTaskData(**cached), request_id=rid)
 
-    data = service.create_task(db, user_id=user_id, payload=payload)
-    db.commit()
-    # 立即返回任务号，审查在响应发出后由后台线程执行（03-概要设计 §5.1）
+    data = await service.create_task(db, user_id=user_id, payload=payload)
+    await db.commit()
+    # 立即返回任务号，审查在响应发出后由后台执行（03-概要设计 §5.1）
     background.add_task(service.enqueue, int(data.task_id))
-    idempotency.save(idempotency_key, data.model_dump())
+    await idempotency.save("review", idempotency_key, data.model_dump())
     return ApiResponse.ok(data, request_id=rid)
 
 
@@ -74,7 +74,7 @@ def create_review(
     response_model=ApiResponse[Page[ReviewListItem]],
     summary="C-05 审查历史列表",
 )
-def list_reviews(
+async def list_reviews(
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,
@@ -84,7 +84,7 @@ def list_reviews(
     status_filter: str | None = Query(None, alias="status"),
     sort: str = Query("-created_at"),
 ) -> ApiResponse[Page[ReviewListItem]]:
-    items, total = service.list_tasks(
+    items, total = await service.list_tasks(
         db,
         user_id=user_id,
         page=page,
@@ -100,10 +100,10 @@ def list_reviews(
     response_model=ApiResponse[ReviewTaskData],
     summary="C-02 查询审查任务状态",
 )
-def get_review(
+async def get_review(
     task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedPoll
 ) -> ApiResponse[ReviewTaskData]:
-    return ApiResponse.ok(service.get_task(db, user_id=user_id, task_id=task_id), request_id=rid)
+    return ApiResponse.ok(await service.get_task(db, user_id=user_id, task_id=task_id), request_id=rid)
 
 
 @router.get(
@@ -111,17 +111,25 @@ def get_review(
     response_model=ApiResponse[ReviewResultData],
     summary="C-03 获取审查结果",
 )
-def get_review_result(
+async def get_review_result(
     task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedRead
 ) -> ApiResponse[ReviewResultData]:
-    return ApiResponse.ok(service.get_result(db, user_id=user_id, task_id=task_id), request_id=rid)
+    return ApiResponse.ok(await service.get_result(db, user_id=user_id, task_id=task_id), request_id=rid)
 
 
 @router.get("/reviews/{task_id}/report", summary="C-04 下载审查报告")
-def download_review_report(
-    task_id: int, db: DbSession, user_id: CurrentUserId, rid: RequestId, _rate: RateLimitedRead
+async def download_review_report(
+    task_id: int,
+    db: DbSession,
+    user_id: CurrentUserId,
+    rid: RequestId,
+    _rate: RateLimitedRead,
+    # 契约写明该查询参数（05-接口设计 §5.4 的 C-04）：一期只支持 pdf。
+    # 用 Literal 而非手工 if：非法取值自动走 40001 的参数校验响应，
+    # 并在 OpenAPI 里呈现为 enum，前端与联调工具都能看到。
+    report_format: Literal["pdf"] = Query("pdf", alias="format", description="报告格式，一期仅支持 pdf"),
 ) -> Response:
-    filename, content = service.get_report(db, user_id=user_id, task_id=task_id)
+    filename, content = await service.get_report(db, user_id=user_id, task_id=task_id)
     return Response(
         content=content,
         media_type="application/pdf",
@@ -138,7 +146,7 @@ def download_review_report(
     response_model=ApiResponse[RiskPointData],
     summary="C-06 标记风险点为误报",
 )
-def dismiss_risk_point(
+async def dismiss_risk_point(
     task_id: int,
     point_id: int,
     payload: DismissRiskPointRequest,
@@ -147,12 +155,12 @@ def dismiss_risk_point(
     rid: RequestId,
     _rate: RateLimitedRead,
 ) -> ApiResponse[RiskPointData]:
-    data = service.dismiss_risk_point(
+    data = await service.dismiss_risk_point(
         db,
         user_id=user_id,
         task_id=task_id,
         point_id=point_id,
         is_dismissed=payload.is_dismissed,
     )
-    db.commit()
+    await db.commit()
     return ApiResponse.ok(data, request_id=rid)

@@ -151,25 +151,28 @@ def test_redis_unavailable_degrades_to_allow(client: TestClient, monkeypatch) ->
     """Redis 挂了要**放行**并告警，而不是让全站 429 —— 限流是保护措施，不该成为可用性依赖。"""
     from app.infra import ratelimit
 
-    monkeypatch.setattr(ratelimit, "_incr", lambda key, ttl: None)
+    async def _incr_unavailable(key: str, ttl: int) -> None:
+        return None
+
+    monkeypatch.setattr(ratelimit, "_incr", _incr_unavailable)
 
     for _ in range(15):
         resp = client.post(LOGIN, json={"account": "19900000003", "password": "abc12345"})
         assert resp.json()["code"] != int(ErrorCode.RATE_LIMITED)
 
 
-def test_counter_key_carries_ttl_and_window(monkeypatch) -> None:
+async def test_counter_key_carries_ttl_and_window(monkeypatch) -> None:
     """计数键必须带 TTL 且**按窗口分段**，否则键会永久堆积（Redis 内存泄漏）。"""
     calls: list[tuple[str, int]] = []
 
     from app.infra import ratelimit
 
-    def spy(key: str, ttl: int) -> int:
+    async def spy(key: str, ttl: int) -> int:
         calls.append((key, ttl))
         return 1
 
     monkeypatch.setattr(ratelimit, "_incr", spy)
-    ratelimit.hit("auth", "ip1.2.3.4", 10)
+    await ratelimit.hit("auth", "ip1.2.3.4", 10)
 
     assert calls, "应调用 _incr"
     key, ttl = calls[0]

@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import BusinessError, ErrorCode
@@ -54,7 +54,7 @@ async def read_upload(upload: UploadFile) -> bytes:
     return data
 
 
-def _check_quota(db: Session, *, user_id: int, incoming_bytes: int) -> None:
+async def _check_quota(db: AsyncSession, *, user_id: int, incoming_bytes: int) -> None:
     """每用户上传配额检查（见风险清单 #6）。
 
     只在**新增内容**时调用 —— 去重命中不落盘，不占用配额。
@@ -64,11 +64,13 @@ def _check_quota(db: Session, *, user_id: int, incoming_bytes: int) -> None:
     ⚠️ 已知局限：并发上传可能同时通过检查而略微超出上限（无跨请求串行化）。
     配额是防"磁盘被单个用户写满"的**粗粒度兜底**，不是精确计量。
     """
-    used_bytes, used_files = db.execute(
-        select(
-            func.coalesce(func.sum(FileObject.byte_size), 0),
-            func.count(FileObject.id),
-        ).where(FileObject.uploader_id == user_id, FileObject.deleted_at.is_(None))
+    used_bytes, used_files = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(FileObject.byte_size), 0),
+                func.count(FileObject.id),
+            ).where(FileObject.uploader_id == user_id, FileObject.deleted_at.is_(None))
+        )
     ).one()
 
     byte_quota = _settings.upload_quota_bytes_per_user
@@ -85,8 +87,8 @@ def _check_quota(db: Session, *, user_id: int, incoming_bytes: int) -> None:
         )
 
 
-def save_upload(
-    db: Session,
+async def save_upload(
+    db: AsyncSession,
     *,
     user_id: int,
     original_name: str | None,
@@ -105,7 +107,7 @@ def save_upload(
 
     digest = sha256_of(data)
 
-    existing = db.scalar(
+    existing = await db.scalar(
         select(FileObject).where(FileObject.sha256 == digest, FileObject.deleted_at.is_(None))
     )
     if existing is not None:
@@ -120,7 +122,7 @@ def save_upload(
     storage = get_storage()
     object_key = object_key_for(digest)
     # 配额检查放在**落盘之前**：这是唯一会新增磁盘占用的分支（去重已在上面返回）。
-    _check_quota(db, user_id=user_id, incoming_bytes=len(data))
+    await _check_quota(db, user_id=user_id, incoming_bytes=len(data))
     # 先落盘再写库：若写库失败，对象存储里多一个无人引用的对象，代价可忽略（内容寻址，
     # 下次同内容上传正好复用它）；反过来则会出现"库里有记录、内容却不存在"。
     storage.put(object_key, data)
@@ -136,12 +138,12 @@ def save_upload(
     )
     try:
         db.add(record)
-        db.flush()
+        await db.flush()
     except IntegrityError:
         # 并发上传同一内容：两个请求都通过了上面的查重，唯一索引拦下后者。
         # 此时应退化为"已存在"语义，而不是把 500 抛给用户。
-        db.rollback()
-        concurrent = db.scalar(select(FileObject).where(FileObject.sha256 == digest))
+        await db.rollback()
+        concurrent = await db.scalar(select(FileObject).where(FileObject.sha256 == digest))
         if concurrent is None:
             raise
         return _to_upload_data(concurrent, is_duplicate=True)
@@ -149,9 +151,9 @@ def save_upload(
     return _to_upload_data(record, is_duplicate=False)
 
 
-def get_file_meta(db: Session, *, user_id: int, file_id: int) -> FileData:
+async def get_file_meta(db: AsyncSession, *, user_id: int, file_id: int) -> FileData:
     """B-02：读取文件元数据。"""
-    record = db.get(FileObject, file_id)
+    record = await db.get(FileObject, file_id)
     if record is None or record.deleted_at is not None:
         raise BusinessError(ErrorCode.FILE_NOT_FOUND, "文件不存在")
     if record.uploader_id != user_id:

@@ -484,7 +484,7 @@ def test_dismiss_validates_body(e2e_client, sample_pdf, monkeypatch, body) -> No
 # ============================================================
 
 
-def test_pipeline_fails_task_when_concurrency_is_full(e2e_client, sample_pdf, monkeypatch) -> None:
+async def test_pipeline_fails_task_when_concurrency_is_full(e2e_client, sample_pdf, monkeypatch) -> None:
     """并发已满时，任务必须以**明确原因**失败。
 
     为什么这样取舍：让它**失败得清楚**（`42901` + 可读消息），
@@ -495,7 +495,7 @@ def test_pipeline_fails_task_when_concurrency_is_full(e2e_client, sample_pdf, mo
     from app.slices.review import pipeline as review_pipeline
 
     busy = PipelineGate(max_concurrent=1, timeout_seconds=0.05)
-    assert busy.acquire(), "先占满唯一的槽位"
+    assert await busy.acquire(), "先占满唯一的槽位"
     monkeypatch.setattr(review_pipeline, "pipeline_gate", busy)
 
     headers = _auth_headers(e2e_client)
@@ -509,10 +509,10 @@ def test_pipeline_fails_task_when_concurrency_is_full(e2e_client, sample_pdf, mo
     assert "繁忙" in task["error_message"], f"失败原因应可读：{task['error_message']}"
 
 
-def test_gate_is_released_after_pipeline_finishes(e2e_client, sample_pdf) -> None:
+async def test_gate_is_released_after_pipeline_finishes(e2e_client, sample_pdf) -> None:
     """流水线结束后必须释放槽位 —— 否则跑几次就把并发能力用光了。
 
-    `BoundedSemaphore` 还有个额外好处：释放多于占用会直接抛错，
+    闸门自带占用计数，释放多于占用会直接抛错，
     所以本用例也能顺带发现"少 release 或多 release"的问题。
     """
     from app.infra.concurrency import pipeline_gate
@@ -528,5 +528,39 @@ def test_gate_is_released_after_pipeline_finishes(e2e_client, sample_pdf) -> Non
         # 默认 stub 提供方 → 流水线会失败，但**必须已经跑完并释放槽位**
         assert task["status"] in ("succeeded", "failed"), task
 
-    assert pipeline_gate.acquire(0.1), "连续跑完三次后槽位应已全部归还"
+    assert await pipeline_gate.acquire(0.1), "连续跑完三次后槽位应已全部归还"
     pipeline_gate.release()
+
+
+def test_report_format_is_validated(client: TestClient) -> None:
+    """C-04 的 `format` 查询参数必须被校验（05-接口设计 §5.4：一期仅支持 pdf）。
+
+    参数校验发生在业务逻辑之前，因此不需要先造出一个已完成的任务。
+    """
+    headers = _auth_headers(client)
+
+    bad = client.get(f"{REVIEWS}/99999999/report?format=html", headers=headers)
+    assert bad.status_code == 400
+    assert bad.json()["code"] == int(ErrorCode.PARAM_INVALID)
+
+    # 合法取值应继续走业务逻辑：任务不存在 → 40401（而不是参数错误）
+    ok = client.get(f"{REVIEWS}/99999999/report?format=pdf", headers=headers)
+    assert ok.json()["code"] == int(ErrorCode.REVIEW_NOT_FOUND)
+
+
+def test_idempotency_key_is_scoped_per_endpoint(
+    e2e_client, sample_pdf, _memory_idempotency_store: dict[str, dict]
+) -> None:
+    """幂等键必须**按接口作用域**存储。
+
+    客户端可能在两个接口上复用同一个 key。若不隔离，后一个接口会把
+    **前一个接口的响应体**原样返回，前端拿到形状不符的数据。
+    """
+    headers = _auth_headers(e2e_client)
+    file_id = _upload(e2e_client, headers, sample_pdf)
+
+    assert _create_review(e2e_client, headers, file_id, key="reused-key").status_code == 202
+
+    assert any(key.startswith("review:") for key in _memory_idempotency_store), (
+        f"键应带接口作用域，实际存的是：{list(_memory_idempotency_store)}"
+    )

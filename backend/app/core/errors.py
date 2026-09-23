@@ -13,7 +13,9 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.core.context import current_request_id
 
 T = TypeVar("T")
 
@@ -36,10 +38,16 @@ class ErrorCode(IntEnum):
     FORBIDDEN = 40301
 
     # --- 404xx 资源不存在 ---
+    # 40400 是**框架级**的"路由不存在"，用于未匹配任何路由的请求；
+    # 各资源的专属码（40401~40404）表示"路由存在但资源不存在"，两者不要混用。
+    RESOURCE_NOT_FOUND = 40400
     REVIEW_NOT_FOUND = 40401
     QA_SESSION_NOT_FOUND = 40402
     KB_DOC_NOT_FOUND = 40403
     FILE_NOT_FOUND = 40404
+
+    # --- 405xx 方法不允许（框架级：路径存在但方法不匹配）---
+    METHOD_NOT_ALLOWED = 40500
 
     # --- 409xx 业务规则冲突 ---
     PHONE_TAKEN = 40901
@@ -81,10 +89,12 @@ _HTTP_STATUS_BY_ERROR: dict[ErrorCode, int] = {
     ErrorCode.ACCESS_TOKEN_INVALID: 401,
     ErrorCode.REFRESH_TOKEN_INVALID: 401,
     ErrorCode.FORBIDDEN: 403,
+    ErrorCode.RESOURCE_NOT_FOUND: 404,
     ErrorCode.REVIEW_NOT_FOUND: 404,
     ErrorCode.QA_SESSION_NOT_FOUND: 404,
     ErrorCode.KB_DOC_NOT_FOUND: 404,
     ErrorCode.FILE_NOT_FOUND: 404,
+    ErrorCode.METHOD_NOT_ALLOWED: 405,
     ErrorCode.PHONE_TAKEN: 409,
     ErrorCode.EMAIL_TAKEN: 409,
     ErrorCode.BAD_CREDENTIALS: 409,
@@ -118,17 +128,29 @@ class FieldError(BaseModel):
     reason: str
 
 
+def _resolve_request_id(request_id: str | None) -> str:
+    """未显式给号时从请求上下文取（见 core/context.py 的兜底说明）。"""
+    return current_request_id() if request_id is None else request_id
+
+
 class ApiResponse[T](BaseModel):
     """统一响应体。**成功与失败都是这个形状**，前端只需一处解析逻辑。"""
 
     code: int = 0
     message: str = "ok"
     data: T | None = None
-    request_id: str = ""
+    # 默认从请求上下文取号（见 core/context.py），因此即使某条路由忘记注入
+    # `RequestId` 依赖，响应体里也**不会**出现空串；请求之外（脚本/后台）仍为空串。
+    request_id: str = Field(default_factory=current_request_id)
 
     @classmethod
-    def ok(cls, data: T | None = None, message: str = "ok", request_id: str = "") -> ApiResponse[T]:
-        return cls(code=int(ErrorCode.OK), message=message, data=data, request_id=request_id)
+    def ok(cls, data: T | None = None, message: str = "ok", request_id: str | None = None) -> ApiResponse[T]:
+        return cls(
+            code=int(ErrorCode.OK),
+            message=message,
+            data=data,
+            request_id=_resolve_request_id(request_id),
+        )
 
     @classmethod
     def fail(
@@ -136,9 +158,14 @@ class ApiResponse[T](BaseModel):
         code: ErrorCode,
         message: str,
         data: Any = None,
-        request_id: str = "",
+        request_id: str | None = None,
     ) -> ApiResponse[T]:
-        return cls(code=int(code), message=message, data=data, request_id=request_id)
+        return cls(
+            code=int(code),
+            message=message,
+            data=data,
+            request_id=_resolve_request_id(request_id),
+        )
 
 
 class PageMeta(BaseModel):

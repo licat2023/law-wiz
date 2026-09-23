@@ -11,27 +11,27 @@ import pytest
 from app.infra.concurrency import PipelineGate, pipeline_gate
 
 
-def test_gate_enforces_capacity() -> None:
-    """容量用尽后必须**超时返回 False**，而不是阻塞等待 —— 阻塞会占住线程池线程。"""
+async def test_gate_enforces_capacity() -> None:
+    """容量用尽后必须**超时返回 False**，而不是阻塞等待 —— 阻塞会占住事件循环。"""
     gate = PipelineGate(max_concurrent=2, timeout_seconds=0.05)
 
-    assert gate.acquire() is True
-    assert gate.acquire() is True
-    assert gate.acquire() is False, "第三个应超时失败"
+    assert await gate.acquire() is True
+    assert await gate.acquire() is True
+    assert await gate.acquire() is False, "第三个应超时失败"
 
     gate.release()
-    assert gate.acquire() is True, "释放后应能再取到"
+    assert await gate.acquire() is True, "释放后应能再取到"
 
 
-def test_release_twice_raises() -> None:
+async def test_release_twice_raises() -> None:
     """重复 release 必须立刻报错。
 
-    用 `BoundedSemaphore` 就是为了这个：否则"释放多于占用"会**悄悄放大容量**，
+    闸门自带占用计数就是为了这个：否则"释放多于占用"会**悄悄放大容量**，
     并发上限失效且无任何征兆。
     """
     gate = PipelineGate(max_concurrent=1)
 
-    assert gate.acquire() is True
+    assert await gate.acquire() is True
     gate.release()
 
     with pytest.raises(ValueError):

@@ -1,8 +1,14 @@
 """测试夹具。
 
-**为什么用 SQLite 内存库而不是 MySQL**：单元测试要能在任何机器上零依赖运行
+**为什么用 SQLite 而不是 MySQL**：单元测试要能在任何机器上零依赖运行
 （包括没起 MySQL 的队友机器与 CI）。代价是 **SQLite 不校验外键**，
 因此"外键约束是否生效"这类检查**必须连真实 MySQL 验证**，不能靠这里的用例。
+
+⚠️ 存储引擎与应用同为**异步**（`aiosqlite`）。夹具与请求处理器运行在
+**不同的事件循环**里，因此引擎一律用 `NullPool`：每条连接在"创建它的那个
+循环"内用完即关，不跨循环复用。SQLite 内存库 + `StaticPool` 恰恰做不到这一点
+（连接会被跨循环复用），所以改为**每个用例一个临时文件库** ——
+顺带获得更强的隔离：用例之间天然零污染，也不需要清库脚本。
 
 ⚠️ 另一个刻意的取舍：**不引入 `fakeredis`**。刷新令牌改用下面的内存替身，
 避免为一个测试再拉一个依赖。
@@ -12,50 +18,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import asyncio
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.api import get_db
 from app.infra.db.base import Base
 from app.main import create_app
 
 
-@pytest.fixture(scope="session")
-def engine():
-    """整个测试会话共用一个内存库。
+def build_engine(url: str) -> AsyncEngine:
+    """构造测试引擎。集中一处，保证 `client` 与 `e2e_client` 用同一套参数。"""
+    return create_async_engine(url, poolclass=NullPool)
 
-    `StaticPool` 是必需的：SQLite 的 `:memory:` **每条连接都是一个独立的库**，
-    没有它就会出现"建表在 A 连接、查询在 B 连接"从而报"表不存在"。
-    """
-    eng = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+
+async def create_schema(engine: AsyncEngine) -> None:
     import app.models  # noqa: F401  确保全部模型已注册到 metadata
 
-    Base.metadata.create_all(eng)
-    yield eng
-    eng.dispose()
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
 
 
 @pytest.fixture
-def db(engine) -> Generator[Session]:
-    """每个用例一个事务，结束即回滚 —— 用例之间互不污染。"""
-    connection = engine.connect()
-    transaction = connection.begin()
-    session = sessionmaker(bind=connection, expire_on_commit=False)()
-    try:
-        yield session
-    finally:
-        session.close()
-        transaction.rollback()
-        connection.close()
+def engine(tmp_path) -> Generator[AsyncEngine]:
+    """整个用例独享一个 SQLite 文件库（见文件头说明）。"""
+    eng = build_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
+    asyncio.run(create_schema(eng))
+    yield eng
+    asyncio.run(eng.dispose())
+
+
+@pytest.fixture
+def db_session_factory(engine: AsyncEngine):
+    return async_sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @pytest.fixture(autouse=True)
@@ -68,12 +67,12 @@ def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
 
     from app.infra import cache
 
-    def store_token(user_id: int, token: str) -> None:
+    async def store_token(user_id: int, token: str) -> None:
         from app.core.security import refresh_token_digest
 
         store[refresh_token_digest(token)] = user_id
 
-    def consume_token(token: str) -> int:
+    async def consume_token(token: str) -> int:
         from app.core.errors import BusinessError, ErrorCode
         from app.core.security import refresh_token_digest
 
@@ -82,7 +81,7 @@ def _memory_refresh_store(monkeypatch) -> Generator[dict[str, int]]:
             raise BusinessError(ErrorCode.REFRESH_TOKEN_INVALID, "刷新令牌无效或已被撤销")
         return store.pop(digest)
 
-    def revoke(token: str, *, user_id: int | None = None) -> None:
+    async def revoke(token: str, *, user_id: int | None = None) -> None:
         from app.core.security import refresh_token_digest
 
         store.pop(refresh_token_digest(token), None)
@@ -136,8 +135,14 @@ def _memory_idempotency_store(monkeypatch) -> Generator[dict[str, dict]]:
 
     from app.core import idempotency
 
-    monkeypatch.setattr(idempotency, "load", lambda key: store.get(key))
-    monkeypatch.setattr(idempotency, "save", lambda key, payload: store.update({key: payload}))
+    async def _load(scope: str, key: str) -> dict | None:
+        return store.get(f"{scope}:{key}")
+
+    async def _save(scope: str, key: str, payload: dict) -> None:
+        store[f"{scope}:{key}"] = payload
+
+    monkeypatch.setattr(idempotency, "load", _load)
+    monkeypatch.setattr(idempotency, "save", _save)
     yield store
 
 
@@ -154,7 +159,7 @@ def _memory_rate_limit_store(monkeypatch) -> Generator[dict[str, int]]:
     """
     counters: dict[str, int] = {}
 
-    def _incr(key: str, ttl: int) -> int:
+    async def _incr(key: str, ttl: int) -> int:
         counters[key] = counters.get(key, 0) + 1
         return counters[key]
 
@@ -176,11 +181,26 @@ def _temp_storage(tmp_path, monkeypatch):
     return instance
 
 
+def _override_db(db_session_factory):
+    """把 `get_db` 依赖替换为测试引擎的会话工厂。
+
+    ⚠️ 不能像同步时代那样直接返回一个共享会话对象：异步会话的底层连接
+    绑定在创建它的事件循环上，而请求由 `TestClient` 在另一个循环里执行。
+    改为"每次请求按需开会话"后，连接始终在请求自己的循环内创建与关闭。
+    """
+
+    async def _get_db() -> AsyncGenerator:
+        async with db_session_factory() as session:
+            yield session
+
+    return _get_db
+
+
 @pytest.fixture
-def client(db: Session) -> Generator[TestClient]:
+def client(db_session_factory) -> Generator[TestClient]:
     """测试客户端。数据库依赖被替换为测试会话。"""
     app = create_app()
-    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_db] = _override_db(db_session_factory)
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -273,44 +293,25 @@ def make_pdf():
 
 
 @pytest.fixture
-def e2e_client(monkeypatch, _temp_storage):
-    """**允许真实提交**的端到端环境，用于审查流水线。
+def e2e_client(monkeypatch, _temp_storage, db_session_factory) -> Generator[TestClient]:
+    """**允许真实提交**的端到端环境，用于审查、索引与问答流水线。
 
-    ⚠️ 与 `client` 夹具的区别在于隔离方式：
-    - `client` 用「事务 + 用例结束回滚」保证隔离，因此**不能承受 commit**；
-    - 审查流水线必须分阶段 commit（否则轮询看不到进度），所以这里改成
-      「**每个用例一个全新的内存库 + 真实提交**」，并在结束时丢弃整个库。
+    ⚠️ 与 `client` 夹具的区别在于**流水线运行在请求之外**：它自建会话
+    （`SessionLocal`）并分阶段提交。因此这里必须把三条流水线的会话工厂
+    一并指向测试引擎 —— 漏掉任何一条，该流水线就会去连真实的 MySQL。
 
-    同时把流水线的会话工厂与存储指向同一套测试资源 —— 流水线运行在请求之外，
-    用的是它自己创建的会话与存储引用。
+    数据库隔离由 `engine` 夹具保证（每个用例一个全新的文件库）。
     """
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    import app.models
-
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-
     from app.slices.kb import pipeline as kb_pipeline
     from app.slices.qa import pipeline as qa_pipeline
     from app.slices.review import pipeline as review_pipeline
 
     app = create_app()
+    app.dependency_overrides[get_db] = _override_db(db_session_factory)
 
-    def _override_get_db():
-        session = factory()
-        try:
-            yield session
-        finally:
-            session.close()
-
-    app.dependency_overrides[get_db] = _override_get_db
-    monkeypatch.setattr(review_pipeline, "SessionLocal", factory)
-    monkeypatch.setattr(kb_pipeline, "SessionLocal", factory)
-    monkeypatch.setattr(qa_pipeline, "SessionLocal", factory)
+    monkeypatch.setattr(review_pipeline, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(kb_pipeline, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(qa_pipeline, "SessionLocal", db_session_factory)
     # 流水线是具名导入，持有自己的 get_storage 引用，需单独替换
     monkeypatch.setattr(review_pipeline, "get_storage", lambda: _temp_storage)
 
@@ -318,7 +319,6 @@ def e2e_client(monkeypatch, _temp_storage):
         yield c
 
     app.dependency_overrides.clear()
-    engine.dispose()
 
 
 @pytest.fixture(autouse=True)

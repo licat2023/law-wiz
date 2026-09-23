@@ -108,5 +108,5 @@ def test_health_does_not_leak_secrets(client: TestClient) -> None:
     """健康检查**不得**返回凭据、连接串或内部地址。"""
     raw = client.get("/api/v1/health").text
 
-    for forbidden in ("password", "secret", "mysql+pymysql", "redis://", "127.0.0.1", "jwt"):
+    for forbidden in ("password", "secret", "mysql+aiomysql", "redis://", "127.0.0.1", "jwt"):
         assert forbidden not in raw.lower(), f"健康检查响应中出现了敏感内容：{forbidden}"
