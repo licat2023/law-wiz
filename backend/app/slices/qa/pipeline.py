@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
 from app.core.config import get_settings
-from app.core.errors import BusinessError, ErrorCode
+from app.core.errors import BusinessError
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.models.qa import QaMessage, QaSession

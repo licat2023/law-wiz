@@ -36,7 +36,9 @@ class ContractReviewAgent:
         )
         return result if isinstance(result, dict) else {}
 
-    async def retrieve(self, db: AsyncSession, *, terms: dict[str, Any], text: str) -> tuple[list[dict], list[RiskRule]]:
+    async def retrieve(
+        self, db: AsyncSession, *, terms: dict[str, Any], text: str
+    ) -> tuple[list[dict], list[RiskRule]]:
         """检索法条候选，并匹配确定性风险规则作为模型失效时的可解释兜底。"""
         query = " ".join(
             str(terms[key])
@@ -47,7 +49,15 @@ class ContractReviewAgent:
             {"doc_id": hit.doc_id, "chunk_id": hit.chunk_id, "text": hit.text, "score": hit.score}
             for hit in vector.search(query or text[:200], top_k=5)
         ]
-        rules = (await db.execute(select(RiskRule).where(RiskRule.is_active.is_(True), RiskRule.deleted_at.is_(None)))).scalars().all()
+        rules = (
+            (
+                await db.execute(
+                    select(RiskRule).where(RiskRule.is_active.is_(True), RiskRule.deleted_at.is_(None))
+                )
+            )
+            .scalars()
+            .all()
+        )
         matched = []
         for rule in rules:
             keywords = [item.strip() for item in (rule.match_keywords or "").split(",") if item.strip()]
@@ -55,16 +65,26 @@ class ContractReviewAgent:
                 matched.append(rule)
         return legal_basis, matched
 
-    def analyze(self, *, terms: dict[str, Any], legal_basis: list[dict], rules: list[RiskRule], text: str) -> tuple[list[dict], list[dict]]:
+    def analyze(
+        self, *, terms: dict[str, Any], legal_basis: list[dict], rules: list[RiskRule], text: str
+    ) -> tuple[list[dict], list[dict]]:
         """基于检索上下文生成并规范化风险点，防止模型把推断冒充为法条依据。"""
         legal_basis_text = "\n".join(f"- {hit['text']}" for hit in legal_basis) or "（未检索到相关法条）"
-        rules_text = "\n".join(
-            f"- {rule.rule_code} {rule.name}：{rule.conclusion}（依据：{rule.legal_basis or '未标注'}）"
-            for rule in rules
-        ) or "（未命中审查规则）"
+        rules_text = (
+            "\n".join(
+                f"- {rule.rule_code} {rule.name}：{rule.conclusion}（依据：{rule.legal_basis or '未标注'}）"
+                for rule in rules
+            )
+            or "（未命中审查规则）"
+        )
         result = llm.complete_structured(
             prompts.ANALYZE_SYSTEM,
-            prompts.ANALYZE_USER_TEMPLATE.format(terms=terms, legal_basis=legal_basis_text, rules=rules_text, text=text[: prompts.MAX_TEXT_CHARS]),
+            prompts.ANALYZE_USER_TEMPLATE.format(
+                terms=terms,
+                legal_basis=legal_basis_text,
+                rules=rules_text,
+                text=text[: prompts.MAX_TEXT_CHARS],
+            ),
             prompts.ANALYZE_SCHEMA,
         )
         raw_points = result.get("risk_points") if isinstance(result, dict) else []

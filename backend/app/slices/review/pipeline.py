@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
@@ -29,6 +29,7 @@ from app.infra.parsing import detect_format
 from app.infra.storage import get_storage, object_key_for, sha256_of
 from app.models.contract import ContractVersion
 from app.models.file import FileObject
+from app.models.knowledge import RiskRule
 from app.models.review import ReviewReport, ReviewTask, RiskPoint
 from app.slices.review.agent import ContractReviewAgent
 from app.slices.review.report import build_report_pdf

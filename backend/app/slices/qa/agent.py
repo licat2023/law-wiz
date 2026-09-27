@@ -73,9 +73,7 @@ class LegalQaAgent:
             candidates=candidates,
         )
 
-    async def _retrieve_context(
-        self, db: AsyncSession, question: str
-    ) -> tuple[str, list[CitationCandidate]]:
+    async def _retrieve_context(self, db: AsyncSession, question: str) -> tuple[str, list[CitationCandidate]]:
         """调用检索 Tool，并过滤已删除或已废止的语料。"""
         hits = vector.search(question, top_k=prompts.MAX_CONTEXT_CHUNKS)
         if not hits:
@@ -91,9 +89,7 @@ class LegalQaAgent:
         document_ids = {chunk.kb_document_id for chunk in chunks.values()}
         documents = {
             document.id: document
-            for document in (
-                await db.execute(select(KbDocument).where(KbDocument.id.in_(document_ids)))
-            )
+            for document in (await db.execute(select(KbDocument).where(KbDocument.id.in_(document_ids))))
             .scalars()
             .all()
         }
@@ -122,9 +118,7 @@ class LegalQaAgent:
         return ("\n\n".join(lines) if lines else "（未检索到相关法条）"), candidates
 
     @staticmethod
-    def record_citations(
-        db: AsyncSession, *, message: QaMessage, answer: LegalQaAnswer
-    ) -> list[QaCitation]:
+    def record_citations(db: AsyncSession, *, message: QaMessage, answer: LegalQaAnswer) -> list[QaCitation]:
         """仅为模型声明实际使用的片段创建可溯源引用记录。"""
         used_indexes = _parse_indexes(answer.used_indexes)
         citations: list[QaCitation] = []
