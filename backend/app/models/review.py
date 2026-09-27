@@ -56,7 +56,7 @@ class ReviewTask(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default="pending"
     )
-    # ocr / extract_terms / retrieve / analyze / report —— 供前端显示进度
+    # text_extract / extract_terms / retrieve / analyze / report —— 供前端显示进度
     stage: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     extracted_terms: Mapped[dict | None] = mapped_column(JSON_V, nullable=True, default=None)

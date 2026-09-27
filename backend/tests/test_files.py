@@ -135,15 +135,14 @@ def test_duplicate_upload_self_heals_missing_content(
     assert _temp_storage.exists(key), "重复上传应把丢失的内容补回来"
 
 
-def test_upload_rejects_extension_lie(client: TestClient, auth_headers: dict[str, str]) -> None:
-    """扩展名与 Content-Type 都伪装成 PDF，但内容是纯文本 —— 必须拒绝。
-
-    若这里放行，等于只做了"看扩展名"的校验，任何人改个后缀就能上传任意文件。
-    """
+def test_upload_text_uses_content_detection_not_extension(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """TXT 没有魔数，仍以严格 UTF-8 文本内容识别，而不是信任扩展名。"""
     resp = _upload(client, b"this is plain text, not a pdf", "fake.pdf", auth_headers)
 
-    assert resp.status_code == 415
-    assert resp.json()["code"] == int(ErrorCode.UNSUPPORTED_FILE_TYPE)
+    assert resp.status_code == 201
+    assert resp.json()["data"]["mime_type"] == "text/plain; charset=utf-8"
 
 
 def test_upload_rejects_empty_file(client: TestClient, auth_headers: dict[str, str]) -> None:

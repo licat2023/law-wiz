@@ -6,7 +6,8 @@
 
 **文本化分流**（见 03-概要设计 §5.1）：文本型 PDF / DOCX 直接解析，
 **不做 OCR** —— 对已含文本的文件做 OCR 只会引入识别误差。
-图片与扫描件无法本地提取，返回 `None`，由上层交给 OCR 能力处理。
+图片与扫描件无法本地提取，返回 `None`。当前 MVP 会由上层给出明确的
+"暂不支持扫描件 OCR"提示；未来接入 OCR Provider 时仍从这一分流点扩展。
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ class ParsedText:
 class FileFormat(StrEnum):
     PDF = "pdf"
     DOCX = "docx"
+    TEXT = "txt"
     JPEG = "jpeg"
     PNG = "png"
 
@@ -44,6 +46,7 @@ class FileFormat(StrEnum):
         return {
             FileFormat.PDF: "application/pdf",
             FileFormat.DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            FileFormat.TEXT: "text/plain; charset=utf-8",
             FileFormat.JPEG: "image/jpeg",
             FileFormat.PNG: "image/png",
         }[self]
@@ -51,7 +54,7 @@ class FileFormat(StrEnum):
     @property
     def is_text_extractable(self) -> bool:
         """能否**本地**提取文本。图片需要 OCR，不在此列。"""
-        return self in (FileFormat.PDF, FileFormat.DOCX)
+        return self in (FileFormat.PDF, FileFormat.DOCX, FileFormat.TEXT)
 
 
 # ---- 魔数 ----
@@ -86,6 +89,8 @@ def detect_format(data: bytes) -> FileFormat | None:
         return FileFormat.PNG
     if data.startswith(_ZIP_MAGIC) and _looks_like_docx(data):
         return FileFormat.DOCX
+    if _looks_like_utf8_text(data):
+        return FileFormat.TEXT
     return None
 
 
@@ -100,7 +105,18 @@ def extract_text(data: bytes, fmt: FileFormat) -> ParsedText | None:
         return _extract_pdf(data)
     if fmt is FileFormat.DOCX:
         return ParsedText(text=_extract_docx(data))
+    if fmt is FileFormat.TEXT:
+        return ParsedText(text=data.decode("utf-8").strip())
     return None
+
+
+def _looks_like_utf8_text(data: bytes) -> bool:
+    """识别无魔数的 UTF-8 TXT，仍拒绝含二进制控制字节的伪装文件。"""
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return bool(data.strip()) and not any(byte < 32 and byte not in {9, 10, 13} for byte in data)
 
 
 def _extract_pdf(data: bytes) -> ParsedText:

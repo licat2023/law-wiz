@@ -297,6 +297,27 @@ def test_pdf_over_page_limit_fails_task_with_actionable_message(e2e_client, make
     assert "页" in task["error_message"], "失败信息应说明是页数问题"
 
 
+def test_scanned_or_image_contract_fails_before_ai_service(e2e_client, fake_ai_service, monkeypatch) -> None:
+    """当前 MVP 不做 OCR：图片合同必须有明确失败语义，且不可调用 Agent。"""
+    from app.slices.review import pipeline
+
+    async def must_not_be_called(**kwargs) -> dict:
+        raise AssertionError("无可提取文本时不应调用 AI-Service")
+
+    monkeypatch.setattr(pipeline.ai_service_client, "contract_review", must_not_be_called)
+    headers = _auth_headers(e2e_client)
+    # JPEG 魔数足以通过文件类型识别；当前阶段无需构造真实图片内容。
+    image = b"\xff\xd8\xff\xe0" + b"scan-contract"
+    file_id = _upload(e2e_client, headers, image)
+    created = _create_review(e2e_client, headers, file_id)
+
+    task = e2e_client.get(f"{REVIEWS}/{created.json()['data']['task_id']}", headers=headers).json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == str(int(ErrorCode.REVIEW_FAILED))
+    assert "暂不支持扫描件 OCR" in task["error_message"]
+
+
 # ============================================================
 # 越权与不存在
 # ============================================================

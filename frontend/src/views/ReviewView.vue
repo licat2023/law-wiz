@@ -13,14 +13,14 @@
         drag
         :auto-upload="false"
         :limit="1"
-        accept=".pdf,.docx,.jpg,.jpeg,.png"
+        accept=".pdf,.docx,.txt"
         :on-change="handleFileChange"
         :on-exceed="handleExceed"
       >
         <el-icon size="48"><UploadFilled /></el-icon>
         <div class="text">
           <p>将文件拖到此处，或点击上传</p>
-          <p class="tip">支持 PDF / Word（docx）/ JPG / PNG，单个文件不超过 20MB</p>
+          <p class="tip">支持可提取文本的 PDF / Word（docx）/ TXT，单个文件不超过 20MB</p>
         </div>
       </el-upload>
 
@@ -54,14 +54,14 @@ import { createReview, getReviewTask, newIdempotencyKey, uploadFile } from '@/ap
 import type { ReviewStage } from '@/api/types'
 
 const MAX_SIZE = 20 * 1024 * 1024
-const ALLOWED_EXT = ['.pdf', '.docx', '.jpg', '.jpeg', '.png']
+const ALLOWED_EXT = ['.pdf', '.docx', '.txt']
 /** 递增轮询间隔（契约：1s → 2s → 3s → 5s），避免长任务下产生大量无用请求 */
 const POLL_INTERVALS = [1000, 2000, 3000, 5000]
 /** 轮询上限 90 秒，超时不再无限转圈 */
 const POLL_TIMEOUT = 90_000
 
 const STAGE_TEXT: Record<Exclude<ReviewStage, null>, string> = {
-  ocr: '正在识别合同文本…',
+  text_extract: '正在提取合同文本…',
   extract_terms: '正在提取关键条款…',
   retrieve: '正在检索法律依据…',
   analyze: '正在分析风险点…',
@@ -93,7 +93,7 @@ const progressText = computed(() =>
 function validateFile(file: File): string | null {
   const ext = '.' + (file.name.split('.').pop() ?? '').toLowerCase()
   if (!ALLOWED_EXT.includes(ext)) {
-    return `不支持 ${ext || '该'} 格式，仅支持 PDF / Word（docx）/ JPG / PNG`
+    return `不支持 ${ext || '该'} 格式，仅支持可提取文本的 PDF / Word（docx）/ TXT`
   }
   if (file.size > MAX_SIZE) {
     return '文件超过 20MB 限制'

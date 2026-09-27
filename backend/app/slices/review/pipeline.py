@@ -7,7 +7,7 @@
 ⚠️ **每个阶段结束都要 `commit`**：轮询接口用另一个数据库会话读取进度，
 若不提交，用户在整个审查期间都只能看到 `pending`。
 
-⚠️ **本文件不实现任何 AI 能力**，只调用 `app/infra/llm.py`、`ocr.py`、`vector.py`
+⚠️ **本文件不实现任何 AI 能力**，只调用 `app/infra/parsing.py` 等统一封装。
 的封装。AI 队友替换这些封装的内部实现即可，本文件无需改动。
 """
 
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
 from app.core.errors import BusinessError, ErrorCode
-from app.infra import ocr, parsing
+from app.infra import parsing
 from app.infra.ai_service import AiServiceClient
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
@@ -36,14 +36,14 @@ from app.slices.review.report import build_report_pdf
 logger = logging.getLogger("lawwiz.review")
 
 # `stage` 的取值与 05-接口设计 §5.4 的 C-02 逐字一致
-STAGE_OCR = "ocr"
+STAGE_TEXT_EXTRACT = "text_extract"
 STAGE_EXTRACT = "extract_terms"
 STAGE_RETRIEVE = "retrieve"
 STAGE_ANALYZE = "analyze"
 STAGE_REPORT = "report"
 
 _STAGE_PROGRESS = {
-    STAGE_OCR: 15,
+    STAGE_TEXT_EXTRACT: 15,
     STAGE_EXTRACT: 40,
     STAGE_RETRIEVE: 60,
     STAGE_ANALYZE: 85,
@@ -90,7 +90,7 @@ async def run_review_pipeline(task_id: int) -> None:
 
             context = _Context()
             stages = (
-                (STAGE_OCR, _stage_ocr),
+                (STAGE_TEXT_EXTRACT, _stage_text_extract),
                 (STAGE_EXTRACT, _stage_extract),
                 (STAGE_RETRIEVE, _stage_retrieve),
                 (STAGE_ANALYZE, _stage_analyze),
@@ -141,11 +141,11 @@ async def _mark_failed(db: AsyncSession, task_id: int, code: str, message: str) 
 
 
 # ============================================================
-# 阶段一：文本化（M2-02）
+# 阶段一：文本提取（M2-02）
 # ============================================================
 
 
-async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
+async def _stage_text_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
     version = await db.get(ContractVersion, task.contract_version_id) if task.contract_version_id else None
     if version is None:
         raise BusinessError(ErrorCode.REVIEW_FAILED, "合同版本不存在，无法审查")
@@ -183,13 +183,13 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
             page_count = parsed.page_count
 
     if not text.strip():
-        # 走到这里有两种情况：① 图片文件（本来就该 OCR）；② **扫描版 PDF** ——
-        # 文件头是 PDF 但没有文本层。二者都要交给 OCR，不能直接判定"无内容"。
-        text = ocr.ocr_extract_text(data)
-        source = "ocr"
-
-    if not text.strip():
-        raise BusinessError(ErrorCode.REVIEW_FAILED, "未能从该文件中提取到任何文本")
+        # Agent 的输入边界是已文本化的 plain_text。当前 MVP 不接 OCR，绝不能把
+        # 空文本或图片二进制送给 ContractReviewAgent；未来 OCR Provider 仍可在此
+        # 分流点补回，再保持下游 Agent 契约不变。
+        raise BusinessError(
+            ErrorCode.REVIEW_FAILED,
+            "当前版本暂不支持扫描件 OCR，请上传可提取文本的 PDF、DOCX 或 TXT 文件。",
+        )
 
     ctx.text = text
     ctx.text_source = source

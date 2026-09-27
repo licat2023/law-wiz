@@ -30,7 +30,7 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
     summary="B-01 上传文件",
 )
 async def upload_file(
-    file: Annotated[UploadFile, File(description="合同文件（PDF / DOCX / JPG / PNG，≤20 MB）")],
+    file: Annotated[UploadFile, File(description="合同文件（PDF / DOCX / TXT / JPG / PNG，≤20 MB）")],
     db: DbSession,
     user_id: CurrentUserId,
     rid: RequestId,

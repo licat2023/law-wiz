@@ -78,6 +78,16 @@ def test_docx_has_no_page_count() -> None:
     assert parsed.page_count is None
 
 
-def test_images_are_deferred_to_ocr() -> None:
-    """图片本地无法提取，返回 None（由上层交给 OCR）。"""
+def test_images_are_not_text_extractable() -> None:
+    """图片本地无法提取，上层应返回 MVP 不支持 OCR 的业务提示。"""
     assert parsing.extract_text(b"\xff\xd8\xff\xe0junk", FileFormat.JPEG) is None
+
+
+def test_utf8_txt_is_detected_and_extracted() -> None:
+    data = "合同价款应于验收后十日内支付。".encode()
+
+    assert parsing.detect_format(data) is FileFormat.TEXT
+    parsed = parsing.extract_text(data, FileFormat.TEXT)
+
+    assert parsed is not None
+    assert parsed.text == "合同价款应于验收后十日内支付。"

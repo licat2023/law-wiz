@@ -102,7 +102,7 @@ async def save_upload(
     if fmt is None:
         raise BusinessError(
             ErrorCode.UNSUPPORTED_FILE_TYPE,
-            "仅支持 PDF、Word（.docx）与 JPG/PNG 图片",
+            "仅支持可提取文本的 PDF、Word（.docx）、TXT 与 JPG/PNG 图片",
         )
 
     digest = sha256_of(data)
