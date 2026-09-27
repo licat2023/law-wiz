@@ -22,16 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
 from app.core.errors import BusinessError, ErrorCode
-from app.infra import llm, ocr, parsing, vector
+from app.infra import ocr, parsing
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.infra.parsing import detect_format
 from app.infra.storage import get_storage, object_key_for, sha256_of
 from app.models.contract import ContractVersion
 from app.models.file import FileObject
-from app.models.knowledge import RiskRule
 from app.models.review import ReviewReport, ReviewTask, RiskPoint
-from app.slices.review import prompts
+from app.slices.review.agent import ContractReviewAgent
 from app.slices.review.report import build_report_pdf
 
 logger = logging.getLogger("lawwiz.review")
@@ -51,8 +50,9 @@ _STAGE_PROGRESS = {
     STAGE_REPORT: 95,
 }
 
-_SOURCE_TYPES = {"retrieved_law", "rule", "llm_inference"}
 _RISK_LEVELS = {"high", "medium", "low"}
+
+contract_review_agent = ContractReviewAgent()
 
 
 @dataclass
@@ -206,12 +206,7 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
 
 
 async def _stage_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    result = llm.complete_structured(
-        prompts.TERMS_SYSTEM,
-        prompts.TERMS_USER_TEMPLATE.format(text=ctx.text[: prompts.MAX_TEXT_CHARS]),
-        prompts.TERMS_SCHEMA,
-    )
-    ctx.terms = result if isinstance(result, dict) else {}
+    ctx.terms = contract_review_agent.extract_terms(ctx.text)
     task.extracted_terms = ctx.terms
     task.raw_llm_output = {"extract_terms": ctx.terms}
 
@@ -222,32 +217,7 @@ async def _stage_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> N
 
 
 async def _stage_retrieve(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    query = " ".join(
-        str(ctx.terms.get(key))
-        for key in ("liability", "payment_terms", "amount", "jurisdiction")
-        if ctx.terms.get(key)
-    )
-    hits = vector.search(query or ctx.text[:200], top_k=5)
-    ctx.legal_basis = [
-        {"doc_id": hit.doc_id, "chunk_id": hit.chunk_id, "text": hit.text, "score": hit.score} for hit in hits
-    ]
-    ctx.rules = await _match_rules(db, ctx.text)
-
-
-async def _match_rules(db: AsyncSession, text: str) -> list[RiskRule]:
-    """按关键词匹配启用的风险规则。
-
-    **这一步是确定性的**（纯字符串匹配，不涉及模型），它是 AI 失效时
-    可解释结论的来源（03-概要设计 §5.3）。
-    """
-    stmt = select(RiskRule).where(RiskRule.is_active.is_(True), RiskRule.deleted_at.is_(None))
-    rules = (await db.execute(stmt)).scalars().all()
-    matched: list[RiskRule] = []
-    for rule in rules:
-        keywords = [k.strip() for k in (rule.match_keywords or "").split(",") if k.strip()]
-        if keywords and any(keyword in text for keyword in keywords):
-            matched.append(rule)
-    return matched
+    ctx.legal_basis, ctx.rules = await contract_review_agent.retrieve(db, terms=ctx.terms, text=ctx.text)
 
 
 # ============================================================
@@ -256,27 +226,9 @@ async def _match_rules(db: AsyncSession, text: str) -> list[RiskRule]:
 
 
 async def _stage_analyze(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    legal_basis_text = "\n".join(f"- {hit['text']}" for hit in ctx.legal_basis) or "（未检索到相关法条）"
-    rules_text = (
-        "\n".join(
-            f"- {r.rule_code} {r.name}：{r.conclusion}（依据：{r.legal_basis or '未标注'}）"
-            for r in ctx.rules
-        )
-        or "（未命中审查规则）"
+    ctx.risk_points, points = contract_review_agent.analyze(
+        terms=ctx.terms, legal_basis=ctx.legal_basis, rules=ctx.rules, text=ctx.text
     )
-
-    result = llm.complete_structured(
-        prompts.ANALYZE_SYSTEM,
-        prompts.ANALYZE_USER_TEMPLATE.format(
-            terms=ctx.terms,
-            legal_basis=legal_basis_text,
-            rules=rules_text,
-            text=ctx.text[: prompts.MAX_TEXT_CHARS],
-        ),
-        prompts.ANALYZE_SCHEMA,
-    )
-    raw_points = result.get("risk_points") if isinstance(result, dict) else None
-    points = raw_points if isinstance(raw_points, list) else []
 
     # ⚠️ **先单独提交一次清理，再写入新的风险点。**
     #
@@ -291,23 +243,10 @@ async def _stage_analyze(db: AsyncSession, task: ReviewTask, ctx: _Context) -> N
     await db.execute(delete(RiskPoint).where(RiskPoint.review_task_id == task.id))
     await db.commit()
 
-    ctx.risk_points = [_normalize_point(p) for p in points if isinstance(p, dict)]
     for point in ctx.risk_points:
         db.add(RiskPoint(review_task_id=task.id, **_point_columns(point)))
 
     task.raw_llm_output = {"extract_terms": ctx.terms, "analyze": points}
-
-
-def _normalize_point(raw: dict[str, Any]) -> dict[str, Any]:
-    """把模型输出收敛到契约允许的取值，**不因模型不守约而让任务失败**。"""
-    level = str(raw.get("risk_level") or "").strip().lower()
-    source = str(raw.get("source_type") or "").strip().lower()
-    point = dict(raw)
-    point["risk_level"] = level if level in _RISK_LEVELS else "medium"
-    # ⚠️ 无法判定的来源一律降级为 llm_inference：把推断冒充法条是本项目最不能接受的失败
-    point["source_type"] = source if source in _SOURCE_TYPES else "llm_inference"
-    point["description"] = str(raw.get("description") or "模型未给出说明")
-    return point
 
 
 def _point_columns(point: dict[str, Any]) -> dict[str, Any]:
