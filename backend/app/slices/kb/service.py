@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -294,7 +296,9 @@ async def search(
     from app.infra import vector
 
     # 多取一些候选：过滤（类型/分级/废止）会淘汰一部分，取少了会凑不满 top_k
-    hits = vector.search(query, top_k=min(top_k * 5, 100))
+    # Chroma 的本地客户端会进行磁盘 I/O；服务层处于事件循环中，必须在线程
+    # 中执行，避免大语料检索阻塞其它请求。
+    hits = await asyncio.to_thread(vector.search, query, min(top_k * 5, 100))
     if not hits:
         return KbSearchData(query=query, items=[])
 

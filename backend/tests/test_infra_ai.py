@@ -106,11 +106,26 @@ def test_vector_memory_backend_round_trip() -> None:
     assert vector.search("任何内容", top_k=5) == [], "清空后不应有命中"
 
 
-def test_vector_unsupported_backend_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """未实现的后端必须显式报错，而不是静默降级成内存实现。"""
-    monkeypatch.setattr(get_settings(), "vector_backend", "chroma")
+def test_vector_chroma_persists_across_client_recreation(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chroma 索引重建客户端后仍可检索，证明不是内存实现的伪装。"""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vector_backend", "chroma")
+    monkeypatch.setattr(settings, "chroma_path", str(tmp_path / "chroma"))
+    monkeypatch.setattr(settings, "chroma_collection", "test_law_knowledge")
+    monkeypatch.setattr(vector, "_CHROMA_CLIENT", None)
+    monkeypatch.setattr(vector, "_CHROMA_CLIENT_PATH", None)
+    monkeypatch.setattr(vector, "_CHROMA_COLLECTION", None)
+    monkeypatch.setattr(vector, "_CHROMA_COLLECTION_KEY", None)
 
-    with pytest.raises(BusinessError) as excinfo:
-        vector.search("x")
+    vector.clear()
+    vector.index_document(9, [{"chunk_id": "9-0", "text": "债务人应当按照约定履行债务"}])
 
-    assert excinfo.value.code == ErrorCode.VECTOR_UNAVAILABLE
+    # 模拟进程重启：丢弃模块缓存后必须仍能从磁盘打开相同 collection。
+    monkeypatch.setattr(vector, "_CHROMA_CLIENT", None)
+    monkeypatch.setattr(vector, "_CHROMA_CLIENT_PATH", None)
+    monkeypatch.setattr(vector, "_CHROMA_COLLECTION", None)
+    monkeypatch.setattr(vector, "_CHROMA_COLLECTION_KEY", None)
+    hits = vector.search("履行债务", top_k=1)
+
+    assert [(hit.doc_id, hit.chunk_id) for hit in hits] == [(9, "9-0")]
+    vector.clear()
