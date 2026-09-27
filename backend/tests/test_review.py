@@ -17,7 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import ErrorCode
-from app.infra import llm as llm_module
 
 REVIEWS = "/api/v1/reviews"
 
@@ -50,10 +49,18 @@ def _create_review(client: TestClient, headers: dict[str, str], file_id: str, **
     )
 
 
-def _fake_llm(system: str, user: str, schema: dict) -> dict:
-    """替代品：按调用的 schema 形状返回不同结果。"""
-    if "risk_points" in schema.get("properties", {}):
+@pytest.fixture
+def fake_ai_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review Pipeline 的内存 AI-Service 替身，不依赖独立进程或网络。"""
+    from app.slices.review import pipeline
+
+    async def contract_review(**kwargs) -> dict:
         return {
+            "extracted_terms": {
+                "parties": ["甲方：甲公司", "乙方：乙公司"],
+                "amount": "人民币 120 万元",
+                "liability": "违约金按合同总额的 30% 计算",
+            },
             "risk_points": [
                 {
                     "risk_level": "high",
@@ -74,13 +81,10 @@ def _fake_llm(system: str, user: str, schema: dict) -> dict:
                     # ⚠️ 故意给一个**非法**来源，用于验证规范化逻辑
                     "source_type": "我就这么认为",
                 },
-            ]
+            ],
         }
-    return {
-        "parties": ["甲方：甲公司", "乙方：乙公司"],
-        "amount": "人民币 120 万元",
-        "liability": "违约金按合同总额的 30% 计算",
-    }
+
+    monkeypatch.setattr(pipeline.ai_service_client, "contract_review", contract_review)
 
 
 # ============================================================
@@ -180,9 +184,8 @@ def test_review_fails_gracefully_when_llm_not_configured(e2e_client, sample_pdf)
     assert task["finished_at"]
 
 
-def test_full_flow_with_fake_llm(e2e_client, sample_pdf, monkeypatch) -> None:
+def test_full_flow_with_fake_ai_service(e2e_client, sample_pdf, fake_ai_service) -> None:
     """AI 可用时的完整链路：上传 → 审查 → 结果 → 报告。"""
-    monkeypatch.setattr(llm_module, "complete_structured", _fake_llm)
     headers = _auth_headers(e2e_client)
     file_id = _upload(e2e_client, headers, sample_pdf)
 
@@ -422,9 +425,8 @@ def test_list_reviews_rejects_bad_sort(e2e_client) -> None:
 # ============================================================
 
 
-def test_dismiss_risk_point(e2e_client, sample_pdf, monkeypatch) -> None:
+def test_dismiss_risk_point(e2e_client, sample_pdf, fake_ai_service) -> None:
     """**这是收集模型误报样本的唯一途径**，必须可用（04-数据库设计 §5.7）。"""
-    monkeypatch.setattr(llm_module, "complete_structured", _fake_llm)
     headers = _auth_headers(e2e_client)
     file_id = _upload(e2e_client, headers, sample_pdf)
     task_id = _create_review(e2e_client, headers, file_id).json()["data"]["task_id"]

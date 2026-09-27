@@ -1,5 +1,6 @@
 import unittest
 
+from app.agent.contract_review.agent import ContractReviewAgent
 from app.agent.legal_qa.agent import LegalQaAgent
 from app.agent.registry import AgentRegistry
 from app.agent.runtime import AgentRuntime
@@ -21,6 +22,17 @@ class _LawTool:
             ),
             # 缺少可追溯内容的来源不得被返回给 Backend 持久化。
             Citation(document_id="law-2", kb_chunk_id="chunk-2"),
+        ]
+
+
+class _RiskRuleTool:
+    async def match(self, plain_text: str, *, request_id: str, trace_id: str | None) -> list[dict]:
+        return [
+            {
+                "risk_level": "high",
+                "description": "测试风险规则命中。",
+                "source_type": "rule",
+            }
         ]
 
 
@@ -46,6 +58,14 @@ class LegalQaAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(result.citations), 1)
         self.assertEqual(result.citations[0].document_id, "law-1")
+
+    async def test_contract_review_graph_returns_rule_risk_points(self):
+        result = await ContractReviewAgent(_LawTool(), _RiskRuleTool()).invoke(
+            {"plain_text": "测试合同文本"}, AgentContext(requestId="contract-review-graph")
+        )
+
+        self.assertEqual(result.extracted_terms["text_length"], len("测试合同文本"))
+        self.assertEqual(result.risk_points[0].source_type, "rule")
 
 
 class AgentInvokeApiTest(unittest.TestCase):

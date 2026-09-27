@@ -23,15 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import now_beijing
 from app.core.errors import BusinessError, ErrorCode
 from app.infra import ocr, parsing
+from app.infra.ai_service import AiServiceClient
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
 from app.infra.parsing import detect_format
 from app.infra.storage import get_storage, object_key_for, sha256_of
 from app.models.contract import ContractVersion
 from app.models.file import FileObject
-from app.models.knowledge import RiskRule
 from app.models.review import ReviewReport, ReviewTask, RiskPoint
-from app.slices.review.agent import ContractReviewAgent
 from app.slices.review.report import build_report_pdf
 
 logger = logging.getLogger("lawwiz.review")
@@ -53,7 +52,7 @@ _STAGE_PROGRESS = {
 
 _RISK_LEVELS = {"high", "medium", "low"}
 
-contract_review_agent = ContractReviewAgent()
+ai_service_client = AiServiceClient()
 
 
 @dataclass
@@ -63,8 +62,6 @@ class _Context:
     text: str = ""
     text_source: str | None = None
     terms: dict[str, Any] = field(default_factory=dict)
-    legal_basis: list[dict[str, Any]] = field(default_factory=list)
-    rules: list[RiskRule] = field(default_factory=list)
     risk_points: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -207,9 +204,7 @@ async def _stage_ocr(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
 
 
 async def _stage_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    ctx.terms = contract_review_agent.extract_terms(ctx.text)
-    task.extracted_terms = ctx.terms
-    task.raw_llm_output = {"extract_terms": ctx.terms}
+    """保留轮询阶段语义；具体提取由 ContractReviewGraph 在后续统一执行。"""
 
 
 # ============================================================
@@ -218,7 +213,7 @@ async def _stage_extract(db: AsyncSession, task: ReviewTask, ctx: _Context) -> N
 
 
 async def _stage_retrieve(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    ctx.legal_basis, ctx.rules = await contract_review_agent.retrieve(db, terms=ctx.terms, text=ctx.text)
+    """保留轮询阶段语义；Graph 内部经 Tool 获取法律与风险规则。"""
 
 
 # ============================================================
@@ -227,9 +222,22 @@ async def _stage_retrieve(db: AsyncSession, task: ReviewTask, ctx: _Context) -> 
 
 
 async def _stage_analyze(db: AsyncSession, task: ReviewTask, ctx: _Context) -> None:
-    ctx.risk_points, points = contract_review_agent.analyze(
-        terms=ctx.terms, legal_basis=ctx.legal_basis, rules=ctx.rules, text=ctx.text
+    result = await ai_service_client.contract_review(
+        plain_text=ctx.text,
+        user_id=task.user_id,
+        task_id=task.id,
+        request_id=f"review_{task.id}",
+        trace_id=f"review_{task.id}",
     )
+    terms = result.get("extracted_terms")
+    points = result.get("risk_points")
+    if not isinstance(terms, dict) or not isinstance(points, list):
+        raise BusinessError(ErrorCode.LLM_BAD_RESPONSE, "AI 服务返回的审查结果不合法")
+    ctx.terms = terms
+    # Agent 输出是不可信的边界数据。持久化前保证前端来源契约不被破坏：
+    # 无法验证的来源必须降为模型推断，不能伪装为法条或人工规则。
+    ctx.risk_points = [_normalize_point(point) for point in points if isinstance(point, dict)]
+    task.extracted_terms = ctx.terms
 
     # ⚠️ **先单独提交一次清理，再写入新的风险点。**
     #
@@ -247,7 +255,7 @@ async def _stage_analyze(db: AsyncSession, task: ReviewTask, ctx: _Context) -> N
     for point in ctx.risk_points:
         db.add(RiskPoint(review_task_id=task.id, **_point_columns(point)))
 
-    task.raw_llm_output = {"extract_terms": ctx.terms, "analyze": points}
+    task.raw_llm_output = {"contract_review": result}
 
 
 def _point_columns(point: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +272,17 @@ def _point_columns(point: dict[str, Any]) -> dict[str, Any]:
         "source_type": point["source_type"],
         "confidence": point.get("confidence"),
     }
+
+
+def _normalize_point(raw: dict[str, Any]) -> dict[str, Any]:
+    point = dict(raw)
+    point["risk_level"] = str(point.get("risk_level") or "").lower()
+    if point["risk_level"] not in _RISK_LEVELS:
+        point["risk_level"] = "medium"
+    if point.get("source_type") not in {"retrieved_law", "rule", "llm_inference"}:
+        point["source_type"] = "llm_inference"
+    point["description"] = str(point.get("description") or "模型未给出说明")
+    return point
 
 
 # ============================================================

@@ -14,6 +14,24 @@ class _InvokeResponse(BaseModel):
 
 
 class AiServiceClient:
+    async def contract_review(
+        self,
+        *,
+        plain_text: str,
+        user_id: int,
+        task_id: int,
+        request_id: str,
+        trace_id: str | None = None,
+    ) -> dict:
+        """调用通用 Agent API；Backend 不感知 ContractReviewGraph 的节点细节。"""
+        return await self._invoke(
+            agent_code="contract_review",
+            input={"plain_text": plain_text},
+            context={"userId": str(user_id), "taskId": str(task_id)},
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+
     async def legal_qa(
         self,
         *,
@@ -23,18 +41,30 @@ class AiServiceClient:
         request_id: str,
         trace_id: str | None = None,
     ) -> dict:
+        return await self._invoke(
+            agent_code="legal_qa",
+            input={"question": question},
+            context={"userId": str(user_id), "sessionId": str(session_id)},
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+
+    async def _invoke(
+        self,
+        *,
+        agent_code: str,
+        input: dict,
+        context: dict,
+        request_id: str,
+        trace_id: str | None,
+    ) -> dict:
         settings = get_settings()
         if not settings.ai_service_base_url:
             raise BusinessError(ErrorCode.LLM_UNAVAILABLE, "AI 服务地址未配置")
         payload = {
-            "agentCode": "legal_qa",
-            "input": {"question": question},
-            "context": {
-                "requestId": request_id,
-                "traceId": trace_id or request_id,
-                "userId": str(user_id),
-                "sessionId": str(session_id),
-            },
+            "agentCode": agent_code,
+            "input": input,
+            "context": {"requestId": request_id, "traceId": trace_id or request_id, **context},
         }
         headers = {"X-Request-ID": request_id, "X-Trace-ID": trace_id or request_id}
         try:

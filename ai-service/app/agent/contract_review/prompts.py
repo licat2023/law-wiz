@@ -1,0 +1,2 @@
+CONTRACT_TERM_EXTRACTION_PROMPT = "提取合同关键条款并返回结构化结果。"
+CONTRACT_RISK_ANALYSIS_PROMPT = "依据法条与风险规则识别合同风险。"

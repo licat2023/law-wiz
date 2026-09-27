@@ -113,6 +113,11 @@ def test_internal_legal_qa_api_requires_service_token(client, monkeypatch) -> No
         "/api/v1/internal/legal-qa/laws?q=违约金",
         headers={"X-Internal-Service-Token": "test-service-token", "X-Request-ID": "internal-test-01"},
     )
+    rules = client.post(
+        "/api/v1/internal/contract-review/risk-rules",
+        json={"plain_text": "测试合同文本"},
+        headers={"X-Internal-Service-Token": "test-service-token", "X-Request-ID": "internal-test-02"},
+    )
 
     assert missing.status_code == 401
     assert missing.json()["code"] == int(ErrorCode.ACCESS_TOKEN_INVALID)
@@ -121,3 +126,6 @@ def test_internal_legal_qa_api_requires_service_token(client, monkeypatch) -> No
     assert accepted.status_code == 200
     assert accepted.json()["code"] == 0
     assert accepted.json()["request_id"] == "internal-test-01"
+    assert rules.status_code == 200
+    assert rules.json()["code"] == 0
+    assert rules.json()["data"] == []
