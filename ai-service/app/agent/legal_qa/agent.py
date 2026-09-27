@@ -5,8 +5,8 @@ from app.schemas.contracts import AgentContext, LegalQaInput, LegalQaResult
 
 
 class LegalQaAgent(BaseAgent):
-    def __init__(self, law_tool) -> None:
-        self._graph = LegalQaGraph(LegalQaNodes(law_tool)).workflow
+    def __init__(self, law_tool, llm=None) -> None:
+        self._graph = LegalQaGraph(LegalQaNodes(law_tool, llm)).workflow
 
     async def invoke(self, input: LegalQaInput, context: AgentContext) -> LegalQaResult:
         # Runtime 的通用入口接收 dict；在业务 Agent 边界完成具体输入契约校验。

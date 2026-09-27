@@ -52,15 +52,34 @@ class ContractReviewInput(BaseModel):
     plain_text: str = Field(min_length=1)
 
 
+class ContractTerms(BaseModel):
+    """LLM 条款提取的结构化输出；允许未来扩展字段。"""
+
+    model_config = ConfigDict(extra="allow")
+    parties: list[str] = Field(default_factory=list)
+    amount: str | None = None
+    payment_terms: str | None = None
+    liability: str | None = None
+    jurisdiction: str | None = None
+    term: str | None = None
+
+
 class RiskPoint(BaseModel):
     risk_level: Literal["high", "medium", "low"]
     risk_category: str | None = None
     clause_title: str | None = None
     clause_text: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
     description: str
     suggestion: str | None = None
     legal_basis: str | None = None
     source_type: Literal["retrieved_law", "rule", "llm_inference"]
+    confidence: float | None = None
+
+
+class ContractRiskAnalysis(BaseModel):
+    risk_points: list[RiskPoint] = Field(default_factory=list)
 
 
 class ContractReviewResult(BaseModel):

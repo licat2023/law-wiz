@@ -1,5 +1,6 @@
 """AI-Service 配置：令牌只从环境读取，绝不写入日志或代码。"""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,10 @@ class Settings(BaseSettings):
     backend_base_url: str = ""
     backend_token: str = ""
     request_timeout_seconds: float = 10.0
+    # 真实密钥只由操作系统环境变量提供；绝不写入日志或仓库。
+    deepseek_api_key: str = Field(default="", validation_alias=AliasChoices("DEEPSEEK_API_KEY", "AI_SERVICE_DEEPSEEK_API_KEY"))
+    deepseek_base_url: str = Field(default="", validation_alias=AliasChoices("DEEPSEEK_BASE_URL", "AI_SERVICE_DEEPSEEK_BASE_URL"))
+    deepseek_model: str = Field(default="", validation_alias=AliasChoices("DEEPSEEK_MODEL", "AI_SERVICE_DEEPSEEK_MODEL"))
 
 
 settings = Settings()

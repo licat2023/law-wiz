@@ -7,8 +7,8 @@ from app.schemas.contracts import AgentContext, ContractReviewInput, ContractRev
 
 
 class ContractReviewAgent(BaseAgent):
-    def __init__(self, law_tool, risk_rule_tool) -> None:
-        self._workflow = ContractReviewGraph(ContractReviewNodes(law_tool, risk_rule_tool)).workflow
+    def __init__(self, law_tool, risk_rule_tool, llm=None) -> None:
+        self._workflow = ContractReviewGraph(ContractReviewNodes(law_tool, risk_rule_tool, llm)).workflow
 
     async def invoke(self, input: ContractReviewInput, context: AgentContext) -> ContractReviewResult:
         if not isinstance(input, ContractReviewInput):
