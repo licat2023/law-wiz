@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
 from typing import Annotated
 
@@ -116,3 +117,19 @@ def get_idempotency_key(
 
 
 IdempotencyKey = Annotated[str, Depends(get_idempotency_key)]
+
+
+def require_internal_service_token(
+    value: Annotated[str | None, Header(alias="X-Internal-Service-Token")] = None,
+) -> None:
+    """校验 AI-Service 的服务身份；不复用用户 JWT，且不记录令牌。"""
+    from app.core.config import get_settings
+
+    expected = get_settings().internal_service_token
+    if not value or not expected:
+        raise BusinessError(ErrorCode.ACCESS_TOKEN_INVALID, "内部服务身份令牌缺失")
+    if not secrets.compare_digest(value, expected):
+        raise BusinessError(ErrorCode.FORBIDDEN, "内部服务身份令牌无效")
+
+
+InternalService = Annotated[None, Depends(require_internal_service_token)]

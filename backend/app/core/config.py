@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     app_name: str = "智法宝"
     api_prefix: str = "/api/v1"
     debug: bool = False
+    # 仅 Backend 与 AI-Service 间使用，绝不是用户访问令牌。
+    internal_service_token: str = ""
+    # 独立 AI-Service 的地址属于部署连接信息，只能由环境变量提供。
+    # 留空时 Adapter 会给出明确的不可用错误，避免误请求未知地址。
+    ai_service_base_url: str = ""
+    ai_service_timeout_seconds: float = 15.0
 
     # 若为 True，注册接口接受固定验证码（见 05-接口设计 §8）。
     # ⚠️ production 下必须为 False —— 由启动期校验强制（见 main.py）。

@@ -19,11 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_beijing
 from app.core.config import get_settings
-from app.core.errors import BusinessError
+from app.core.errors import BusinessError, ErrorCode
+from app.infra.ai_service import AiServiceClient
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
-from app.models.qa import QaMessage, QaSession
-from app.slices.qa.agent import LegalQaAgent
+from app.models.qa import QaCitation, QaMessage, QaSession
 
 logger = logging.getLogger("lawwiz.qa")
 
@@ -32,7 +32,7 @@ _settings = get_settings()
 _GENERATION_FAILED = "回答生成失败，请稍后重试。"
 
 # Agent 无状态，可在进程内复用；数据库会话仍由每次流水线调用传入。
-legal_qa_agent = LegalQaAgent()
+ai_service_client = AiServiceClient()
 
 
 async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
@@ -55,11 +55,29 @@ async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
                 return
 
             started = time.perf_counter()
-            answer = await legal_qa_agent.invoke(db=db, question=question)
+            result = await ai_service_client.legal_qa(
+                question=question,
+                user_id=session.user_id,
+                session_id=session.id,
+                request_id=f"qa_{message.id}",
+                trace_id=f"qa_{message.id}",
+            )
             elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-            citations = legal_qa_agent.record_citations(db, message=message, answer=answer)
-            message.content = answer.content
+            answer = str(result.get("answer") or "").strip()
+            if not answer:
+                raise BusinessError(ErrorCode.LLM_BAD_RESPONSE, "AI 服务未返回回答内容")
+            citations = []
+            for item in result.get("citations", []):
+                if not isinstance(item, dict) or not item.get("document_id") or not item.get("kb_chunk_id"):
+                    continue
+                citation = QaCitation(
+                    qa_message_id=message.id, kb_document_id=int(item["document_id"]), kb_chunk_id=int(item["kb_chunk_id"]),
+                    quoted_text=item.get("quoted_text"), relevance_score=item.get("relevance_score"),
+                )
+                db.add(citation)
+                citations.append(citation)
+            message.content = answer
             message.has_citation = bool(citations)
             message.model_name = _settings.llm_model
             message.latency_ms = elapsed_ms

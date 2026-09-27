@@ -1,4 +1,8 @@
-from abc import ABC,abstractmethod
+from abc import ABC, abstractmethod
+from typing import Any
+
+from app.schemas.contracts import AgentContext
+
 
 class BaseAgent(ABC):
     """
@@ -9,13 +13,11 @@ class BaseAgent(ABC):
     """
 
     @abstractmethod
-    def invoke(self,message: str,scene:str) -> dict:
+    async def invoke(self, input: Any, context: AgentContext) -> Any:
         """
         执行 Agent 调用
 
-        :param message: 用户输入消息
-        :param scene: 当前业务场景
-        :return: Agent 执行结果
+        `input` 是具体 Agent 的输入模型；`context` 只承载通用身份与追踪信息。
         """
 
-        pass
+        raise NotImplementedError

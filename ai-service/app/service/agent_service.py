@@ -1,19 +1,22 @@
 from app.agent.registry import AgentRegistry
 from app.agent.runtime import AgentRuntime
+from app.schemas.contracts import AgentContext
+
 
 class AgentService:
     """
-      Agent业务服务层。
+    Agent业务服务层。
 
-      职责：
-      - 接收上层调用参数
-      - 调用AgentRuntime执行Agent
+    职责：
+    - 接收上层调用参数
+    - 调用AgentRuntime执行Agent
 
-      不负责：
-      - 查找Agent
-      - 创建具体Agent
-      - 管理Agent生命周期
-      """
+    不负责：
+    - 查找Agent
+    - 创建具体Agent
+    - 管理Agent生命周期
+    """
+
     def __init__(self):
         """
         初始化Agent服务。
@@ -28,18 +31,14 @@ class AgentService:
         registry = AgentRegistry()
 
         # Runtime负责Agent调度
-        self.runtime = AgentRuntime(
-            registry
-        )
+        self.runtime = AgentRuntime(registry)
 
-
-
-    def handle(
+    async def handle(
         self,
-        message: str,
-        scene: str,
-        agent_code: str = "demo"
-    ) -> dict:
+        agent_code: str,
+        input: object,
+        context: AgentContext,
+    ) -> object:
         """
         调用Agent。
 
@@ -55,8 +54,4 @@ class AgentService:
 
         """
 
-        return self.runtime.invoke(
-            agent_code,
-            message,
-            scene
-        )
+        return await self.runtime.invoke(agent_code, input, context)

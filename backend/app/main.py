@@ -65,6 +65,7 @@ def register_routers(app: FastAPI) -> None:
 
     ⚠️ 新增切片时必须在此登记，否则路由静默不可达。
     """
+    from app.api.internal import router as internal_router
     from app.slices.auth import router as auth_router
     from app.slices.files import router as files_router
     from app.slices.health import router as health_router
@@ -74,6 +75,7 @@ def register_routers(app: FastAPI) -> None:
 
     app.include_router(health_router, prefix=_settings.api_prefix)
     app.include_router(auth_router, prefix=_settings.api_prefix)
+    app.include_router(internal_router, prefix=_settings.api_prefix)
     app.include_router(files_router, prefix=_settings.api_prefix)
     app.include_router(review_router, prefix=_settings.api_prefix)
     app.include_router(kb_router, prefix=_settings.api_prefix)

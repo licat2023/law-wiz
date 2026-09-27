@@ -12,7 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import ErrorCode
-from app.infra import llm as llm_module
 
 SESSIONS = "/api/v1/qa/sessions"
 KB = "/api/v1/kb/documents"
@@ -23,15 +22,28 @@ CORPUS = """中华人民共和国民法典（节选）
 
 
 @pytest.fixture
-def fake_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """切到 `fake` 提供方。
+def fake_ai_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AI-Service 的内存替身：Pipeline 测试不依赖独立进程或真实网络。"""
+    from app.slices.qa import pipeline
 
-    ⚠️ 测试基线（conftest）把提供方钉在 `stub`，即"AI 未接入"——
-    因此凡是要走到**生成成功**的用例，都必须显式切到 `fake`。
-    """
-    from app.core.config import get_settings
+    async def legal_qa(
+        *, question: str, user_id: int, session_id: int, request_id: str, trace_id: str | None = None
+    ) -> dict:
+        if "完全没有" in question:
+            return {"answer": "未找到直接法律依据。", "citations": []}
+        return {
+            "answer": "由 Fake AI-Service 返回的回答。",
+            "citations": [
+                {
+                    "document_id": "1",
+                    "kb_chunk_id": "1",
+                    "quoted_text": "测试引用",
+                    "relevance_score": 0.9,
+                }
+            ],
+        }
 
-    monkeypatch.setattr(get_settings(), "llm_provider", "fake")
+    monkeypatch.setattr(pipeline.ai_service_client, "legal_qa", legal_qa)
 
 
 def _auth(client: TestClient, phone: str = "13800000041") -> dict[str, str]:
@@ -193,7 +205,7 @@ def test_ask_requires_idempotency_key(client: TestClient) -> None:
     assert resp.json()["code"] == int(ErrorCode.PARAM_INVALID)
 
 
-def test_ask_generates_answer_with_citations(e2e_client, fake_llm) -> None:
+def test_ask_generates_answer_with_citations(e2e_client, fake_ai_service) -> None:
     """**完整链路**：知识库有依据 → 回答带可读引用，`has_citation = true`。"""
     headers = _auth(e2e_client)
     _seed_knowledge(e2e_client, headers)
@@ -310,8 +322,8 @@ def test_messages_are_paginated(e2e_client, monkeypatch) -> None:
     assert first_page["messages"]["items"][0]["role"] == "user"
 
 
-def test_answer_uses_fake_provider_when_configured(e2e_client, fake_llm) -> None:
-    """把提供方切成 `fake` 也应能跑通（`.env` 的默认设置即此）。"""
+def test_answer_uses_fake_provider_when_configured(e2e_client, fake_ai_service) -> None:
+    """AI-Service 内存替身应保持回答与引用的 Backend 持久化链路可测。"""
     headers = _auth(e2e_client)
     _seed_knowledge(e2e_client, headers)
     session_id = _create_session(e2e_client, headers)
@@ -325,39 +337,39 @@ def test_answer_uses_fake_provider_when_configured(e2e_client, fake_llm) -> None
     assert answer["has_citation"] is True
 
 
-def test_llm_module_is_actually_used(e2e_client, monkeypatch) -> None:
-    """确认流水线**确实经过** `infra/llm.py` 封装（而不是绕过它）。"""
+def test_ai_service_client_is_actually_used(e2e_client, monkeypatch) -> None:
+    """确认流水线经过唯一的 AI-Service 适配器，而不是绕过正式调用链。"""
     calls: list[dict] = []
 
-    def spy(system: str, user: str, schema: dict) -> dict:
-        calls.append({"system": system, "schema": schema})
-        return {"answer": "由测试替身生成的回答", "used_indexes": []}
-
-    monkeypatch.setattr(llm_module, "complete_structured", spy)
+    from app.slices.qa import pipeline
+    async def spy(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"answer": "由测试替身生成的回答", "citations": []}
+    monkeypatch.setattr(pipeline.ai_service_client, "legal_qa", spy)
     headers = _auth(e2e_client)
     session_id = _create_session(e2e_client, headers)
 
     _ask(e2e_client, headers, session_id, "任意问题")
 
-    assert calls, "流水线必须调用 infra/llm.py 的封装"
+    assert calls, "流水线必须调用 AiServiceClient"
     answer = e2e_client.get(f"{SESSIONS}/{session_id}", headers=headers).json()["data"]["messages"]["items"][
         1
     ]
     assert answer["content"] == "由测试替身生成的回答"
 
 
-def test_pipeline_invokes_formal_legal_qa_agent(e2e_client, monkeypatch) -> None:
+def test_pipeline_invokes_ai_service_client(e2e_client, monkeypatch) -> None:
     """问答流水线必须委托正式 Agent，而不是把检索/生成逻辑留在自身。"""
     from app.slices.qa import pipeline
 
     calls: list[str] = []
-    original_invoke = pipeline.legal_qa_agent.invoke
+    original_invoke = pipeline.ai_service_client.legal_qa
 
-    async def spy(*, db, question: str):
-        calls.append(question)
-        return await original_invoke(db=db, question=question)
+    async def spy(**kwargs):
+        calls.append(kwargs["question"])
+        return await original_invoke(**kwargs)
 
-    monkeypatch.setattr(pipeline.legal_qa_agent, "invoke", spy)
+    monkeypatch.setattr(pipeline.ai_service_client, "legal_qa", spy)
     headers = _auth(e2e_client)
     session_id = _create_session(e2e_client, headers)
 
