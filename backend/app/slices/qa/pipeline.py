@@ -20,18 +20,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import now_beijing
 from app.core.config import get_settings
 from app.core.errors import BusinessError, ErrorCode
-from app.infra import llm, vector
 from app.infra.concurrency import pipeline_gate
 from app.infra.db.session import SessionLocal
-from app.models.knowledge import KbChunk, KbDocument
-from app.models.qa import QaCitation, QaMessage, QaSession
-from app.slices.qa import prompts
+from app.models.qa import QaMessage, QaSession
+from app.slices.qa.agent import LegalQaAgent
 
 logger = logging.getLogger("lawwiz.qa")
 
 _settings = get_settings()
 
 _GENERATION_FAILED = "回答生成失败，请稍后重试。"
+
+# Agent 无状态，可在进程内复用；数据库会话仍由每次流水线调用传入。
+legal_qa_agent = LegalQaAgent()
 
 
 async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
@@ -54,22 +55,11 @@ async def run_answer_pipeline(*, message_id: int, session_id: int) -> None:
                 return
 
             started = time.perf_counter()
-            context, candidates = await _build_context(db, question)
-            result = llm.complete_structured(
-                prompts.QA_SYSTEM,
-                prompts.QA_USER_TEMPLATE.format(context=context, question=question),
-                prompts.QA_SCHEMA,
-            )
+            answer = await legal_qa_agent.invoke(db=db, question=question)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-            answer = str(result.get("answer") or "").strip()
-            if not answer:
-                raise BusinessError(ErrorCode.LLM_BAD_RESPONSE, "模型未返回回答内容")
-
-            citations = _record_citations(
-                db, message=message, used=result.get("used_indexes"), candidates=candidates
-            )
-            message.content = answer
+            citations = legal_qa_agent.record_citations(db, message=message, answer=answer)
+            message.content = answer.content
             message.has_citation = bool(citations)
             message.model_name = _settings.llm_model
             message.latency_ms = elapsed_ms
@@ -97,100 +87,6 @@ async def _load_question(db: AsyncSession, *, session_id: int, before_message_id
         .order_by(QaMessage.id.desc())
         .limit(1)
     )
-
-
-async def _build_context(db: AsyncSession, question: str) -> tuple[str, list[dict]]:
-    """检索法条片段并拼成上下文。
-
-    返回 (上下文文本, 候选列表)。候选列表的 `index` 与提示词里片段序号一一对应，
-    模型回报的 `used_indexes` 据此映射回具体分块。
-    """
-    hits = vector.search(question, top_k=prompts.MAX_CONTEXT_CHUNKS)
-    if not hits:
-        return "（未检索到相关法条）", []
-
-    chunk_ids = [int(hit.chunk_id) for hit in hits if hit.chunk_id.isdigit()]
-    chunks = {
-        chunk.id: chunk
-        for chunk in (await db.execute(select(KbChunk).where(KbChunk.id.in_(chunk_ids)))).scalars().all()
-    }
-    document_ids = {chunk.kb_document_id for chunk in chunks.values()}
-    documents = {
-        document.id: document
-        for document in (await db.execute(select(KbDocument).where(KbDocument.id.in_(document_ids))))
-        .scalars()
-        .all()
-    }
-
-    candidates: list[dict] = []
-    lines: list[str] = []
-    for hit in hits:
-        if not hit.chunk_id.isdigit():
-            continue
-        chunk = chunks.get(int(hit.chunk_id))
-        if chunk is None:
-            continue
-        document = documents.get(chunk.kb_document_id)
-        if document is None or document.deleted_at is not None:
-            continue
-        # 已废止法条**不得进入上下文**：据以作答是本项目最严重的失败形态之一
-        if document.abolished_date is not None:
-            continue
-
-        index = len(candidates) + 1
-        label = f"{chunk.law_name or document.law_name or document.title}"
-        if chunk.article_no or document.article_no:
-            label += f" {chunk.article_no or document.article_no}"
-        candidates.append(
-            {
-                "index": index,
-                "chunk": chunk,
-                "document": document,
-                "quoted_text": chunk.content,
-                "score": hit.score,
-            }
-        )
-        lines.append(f"[{index}] {label}\n{chunk.content}")
-
-    return ("\n\n".join(lines) if lines else "（未检索到相关法条）"), candidates
-
-
-def _record_citations(
-    db: AsyncSession, *, message: QaMessage, used: object, candidates: list[dict]
-) -> list[QaCitation]:
-    """按模型回报的片段序号建立引用记录。
-
-    ⚠️ **只记录模型实际依据的片段**，而不是"检索到的全部片段" ——
-    后者会让引用看起来比实际更充分，违背"回答溯源"的目的。
-    """
-    indexes: set[int] = set()
-    if isinstance(used, list):
-        for item in used:
-            if isinstance(item, int):
-                indexes.add(item)
-            elif isinstance(item, str) and item.isdigit():
-                indexes.add(int(item))
-
-    citations: list[QaCitation] = []
-    for candidate in candidates:
-        if candidate["index"] not in indexes:
-            continue
-        chunk: KbChunk = candidate["chunk"]
-        document: KbDocument = candidate["document"]
-        citation = QaCitation(
-            qa_message_id=message.id,
-            kb_document_id=document.id,
-            kb_chunk_id=chunk.id,
-            quoted_text=candidate["quoted_text"],
-            relevance_score=candidate["score"],
-        )
-        db.add(citation)
-        citations.append(citation)
-
-    if indexes and not citations:
-        # 模型回报了序号，但都对不上候选（例如编造了序号）—— 如实降级为"无依据"
-        logger.warning("模型回报的 used_indexes %s 与候选片段对不上", sorted(indexes))
-    return citations
 
 
 async def _write_failure(db: AsyncSession, message: QaMessage | int, reason: str) -> None:

@@ -344,3 +344,23 @@ def test_llm_module_is_actually_used(e2e_client, monkeypatch) -> None:
         1
     ]
     assert answer["content"] == "由测试替身生成的回答"
+
+
+def test_pipeline_invokes_formal_legal_qa_agent(e2e_client, monkeypatch) -> None:
+    """问答流水线必须委托正式 Agent，而不是把检索/生成逻辑留在自身。"""
+    from app.slices.qa import pipeline
+
+    calls: list[str] = []
+    original_invoke = pipeline.legal_qa_agent.invoke
+
+    async def spy(*, db, question: str):
+        calls.append(question)
+        return await original_invoke(db=db, question=question)
+
+    monkeypatch.setattr(pipeline.legal_qa_agent, "invoke", spy)
+    headers = _auth(e2e_client)
+    session_id = _create_session(e2e_client, headers)
+
+    _ask(e2e_client, headers, session_id, "正式 Agent 是否已被调用？")
+
+    assert calls == ["正式 Agent 是否已被调用？"]

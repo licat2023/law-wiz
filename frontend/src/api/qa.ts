@@ -1,8 +1,8 @@
 /**
  * 法律 AI 问答接口（M3 的 E 组）。
  *
- * ⚠️ **M3 的后端切片尚未实现**（见 `backend/app/slices/README.md`，由 C 负责）。
- * 函数签名已按 05-接口设计 §5.6 冻结。
+ * 后端由 `backend/app/slices/qa/` 提供；函数签名与
+ * docs/05-接口设计.md §5.6 的 E-01 ~ E-05 保持一致。
  */
 
 import { api, http } from './client'
