@@ -163,7 +163,7 @@ export interface CreateReviewRequest {
 export type ReviewStatus = 'pending' | 'processing' | 'succeeded' | 'failed'
 
 /** 处理阶段，用于展示进度文案 */
-export type ReviewStage = 'ocr' | 'extract_terms' | 'retrieve' | 'analyze' | 'report' | null
+export type ReviewStage = 'text_extract' | 'extract_terms' | 'retrieve' | 'analyze' | 'report' | null
 
 export interface ReviewTaskData {
   task_id: string
