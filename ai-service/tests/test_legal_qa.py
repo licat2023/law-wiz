@@ -1,11 +1,13 @@
 import unittest
+from unittest.mock import AsyncMock, Mock
 
 from app.agent.contract_review.agent import ContractReviewAgent
+from app.agent.contract_review.nodes import ContractReviewNodes
 from app.agent.legal_qa.agent import LegalQaAgent
 from app.agent.registry import AgentRegistry
 from app.agent.runtime import AgentRuntime
 from app.main import app
-from app.schemas.contracts import AgentContext, Citation
+from app.schemas.contracts import AgentContext, Citation, ContractRiskAnalysis, ContractTerms
 from fastapi.testclient import TestClient
 
 
@@ -66,6 +68,38 @@ class LegalQaAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.extracted_terms["text_length"], len("测试合同文本"))
         self.assertEqual(result.risk_points[0].source_type, "rule")
+
+    async def test_contract_terms_use_deepseek_compatible_json_mode(self):
+        """真实 DeepSeek 不接受 json_schema，必须请求其支持的 json_object 模式。"""
+        structured_model = Mock()
+        structured_model.ainvoke = AsyncMock(return_value=ContractTerms())
+        model = Mock()
+        model.with_structured_output.return_value = structured_model
+
+        result = await ContractReviewNodes(_LawTool(), _RiskRuleTool(), model).extract_terms(
+            {"plain_text": "测试合同文本"}
+        )
+
+        model.with_structured_output.assert_called_once_with(ContractTerms, method="json_mode")
+        self.assertEqual(result["extracted_terms"]["parties"], [])
+
+    async def test_contract_risks_use_deepseek_compatible_json_mode(self):
+        structured_model = Mock()
+        structured_model.ainvoke = AsyncMock(return_value=ContractRiskAnalysis())
+        model = Mock()
+        model.with_structured_output.return_value = structured_model
+
+        result = await ContractReviewNodes(_LawTool(), _RiskRuleTool(), model).analyze_risks(
+            {
+                "plain_text": "测试合同文本",
+                "extracted_terms": {},
+                "laws": [],
+                "rules": [],
+            }
+        )
+
+        model.with_structured_output.assert_called_once_with(ContractRiskAnalysis, method="json_mode")
+        self.assertEqual(result["risk_points"], [])
 
 
 class AgentInvokeApiTest(unittest.TestCase):
