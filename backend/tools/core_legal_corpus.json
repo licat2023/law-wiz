@@ -1,0 +1,49 @@
+{
+  "documents": [
+    {
+      "doc_type": "law",
+      "corpus_tier": 1,
+      "title": "中华人民共和国民法典（合同订立与效力节选）",
+      "law_name": "中华人民共和国民法典",
+      "effective_date": "2021-01-01",
+      "source": "中华人民共和国最高人民法院",
+      "source_url": "https://www.court.gov.cn/zixun/xiangqing/233181.html",
+      "content": "第四百六十九条 当事人订立合同，可以采用书面形式、口头形式或者其他形式。书面形式是合同书、信件、电报、电传、传真等可以有形地表现所载内容的形式。以电子数据交换、电子邮件等方式能够有形地表现所载内容，并可以随时调取查用的数据电文，视为书面形式。\n\n第五百零二条 依法成立的合同，自成立时生效，但是法律另有规定或者当事人另有约定的除外。"
+    },
+    {
+      "doc_type": "law",
+      "corpus_tier": 1,
+      "title": "中华人民共和国民法典（违约责任节选）",
+      "law_name": "中华人民共和国民法典",
+      "effective_date": "2021-01-01",
+      "source": "中华人民共和国最高人民法院",
+      "source_url": "https://tjca.miit.gov.cn/zwgk/zcwj/flfg/art/2020/art_20cf1a2e1b854924b5caa744c8045d1f.html",
+      "content": "第五百七十七条 当事人一方不履行合同义务或者履行合同义务不符合约定的，应当承担继续履行、采取补救措施或者赔偿损失等违约责任。\n\n第五百八十五条 当事人可以约定一方违约时应当根据违约情况向对方支付一定数额的违约金，也可以约定因违约产生的损失赔偿额的计算方法。约定的违约金低于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以增加；约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以适当减少。"
+    },
+    {
+      "doc_type": "law",
+      "corpus_tier": 1,
+      "title": "中华人民共和国电子签名法（可靠电子签名节选）",
+      "law_name": "中华人民共和国电子签名法",
+      "effective_date": "2019-04-23",
+      "source": "中华人民共和国工业和信息化部",
+      "source_url": "https://www.miit.gov.cn/datainfo/fgk/gytxyxxhfg/fl/art/2020/art_60e5aadb101c48bf94d06a99ff032361.html",
+      "content": "第十三条 电子签名同时符合下列条件的，视为可靠的电子签名：（一）电子签名制作数据用于电子签名时，属于电子签名人专有；（二）签署时电子签名制作数据仅由电子签名人控制；（三）签署后对电子签名的任何改动能够被发现；（四）签署后对数据电文内容和形式的任何改动能够被发现。\n\n第十四条 可靠的电子签名与手写签名或者盖章具有同等的法律效力。"
+    },
+    {
+      "doc_type": "interpretation",
+      "corpus_tier": 1,
+      "title": "最高人民法院关于适用《中华人民共和国民法典》合同编通则若干问题的解释（节选）",
+      "law_name": "最高人民法院关于适用《中华人民共和国民法典》合同编通则若干问题的解释",
+      "effective_date": "2023-12-05",
+      "source": "中华人民共和国最高人民法院",
+      "source_url": "https://www.court.gov.cn/fabu/xiangqing/419382.html",
+      "content": "法释〔2023〕13号。为正确审理合同纠纷案件以及非因合同产生的债权债务关系纠纷案件，依法保护当事人的合法权益，根据《中华人民共和国民法典》《中华人民共和国民事诉讼法》等相关法律规定，结合审判实践，制定本解释。"
+    }
+  ],
+  "risk_rules": [
+    {"rule_code":"R-0001","name":"违约金比例提示","category":"legal","risk_level":"high","condition_expr":"合同文本出现违约金且比例较高","conclusion":"违约金约定可能过分高于实际损失，存在被请求调整的风险。","suggestion":"明确违约金计算基础并结合预期损失设置合理比例。","legal_basis":"《中华人民共和国民法典》第五百八十五条","match_keywords":"违约金,30%,50%"},
+    {"rule_code":"R-0002","name":"验收条款缺失提示","category":"commercial","risk_level":"medium","condition_expr":"合同含付款约定但未见验收关键词","conclusion":"未明确验收标准或期限可能引发付款与质量争议。","suggestion":"补充验收标准、验收期限、异议期限及逾期处理。","legal_basis":"《中华人民共和国民法典》承揽合同相关规定","match_keywords":"付款,验收"},
+    {"rule_code":"R-0003","name":"电子签名效力提示","category":"compliance","risk_level":"medium","condition_expr":"合同使用电子签名","conclusion":"电子签名是否可靠将影响证据与效力判断。","suggestion":"使用依法设立的电子认证服务并保存签署过程证据。","legal_basis":"《中华人民共和国电子签名法》第十三条、第十四条","match_keywords":"电子签名,签章"}
+  ]
+}
