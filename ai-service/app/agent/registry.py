@@ -3,6 +3,7 @@ from app.agent.core.base_agent import BaseAgent
 from app.agent.core.demo_agent import DemoAgent
 from app.agent.legal_qa.agent import LegalQaAgent
 from app.core.config import settings
+from app.llm.deepseek import create_chat_model
 from app.tools.backend import FakeLawTool, FakeRiskRuleTool, LawRetrievalTool, RiskRuleTool
 
 
@@ -40,8 +41,9 @@ class AgentRegistry:
         # 初始化注册当前已有的 Agent
         self.register("demo", DemoAgent())
         law_tool, risk_rule_tool = self._build_tools()
-        self.register("legal_qa", LegalQaAgent(law_tool))
-        self.register("contract_review", ContractReviewAgent(law_tool, risk_rule_tool))
+        llm = self._build_llm()
+        self.register("legal_qa", LegalQaAgent(law_tool, llm))
+        self.register("contract_review", ContractReviewAgent(law_tool, risk_rule_tool, llm))
 
     @staticmethod
     def _build_tools():
@@ -49,6 +51,13 @@ class AgentRegistry:
         if settings.backend_base_url and settings.backend_token:
             return LawRetrievalTool(), RiskRuleTool()
         return FakeLawTool(), FakeRiskRuleTool()
+
+    @staticmethod
+    def _build_llm():
+        """仅在完整配置时构建真实 DeepSeek；测试与离线环境不触发网络。"""
+        if settings.deepseek_api_key and settings.deepseek_base_url and settings.deepseek_model:
+            return create_chat_model()
+        return None
 
     def register(self, agent_code: str, agent: BaseAgent) -> None:
         """

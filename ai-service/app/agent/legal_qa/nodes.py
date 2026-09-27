@@ -1,10 +1,12 @@
 from app.agent.legal_qa.prompts import LEGAL_QA_PROMPT
 from app.agent.legal_qa.state import LegalQaState
+from app.llm.deepseek import invoke_chat
 
 
 class LegalQaNodes:
-    def __init__(self, law_tool) -> None:
+    def __init__(self, law_tool, llm=None) -> None:
         self._law_tool = law_tool
+        self._llm = llm
 
     async def prepare_query(self, state: LegalQaState) -> LegalQaState:
         return state
@@ -18,9 +20,14 @@ class LegalQaNodes:
         }
 
     async def generate_answer(self, state: LegalQaState) -> LegalQaState:
-        LEGAL_QA_PROMPT.format_messages(question=state["question"], sources=state.get("sources", []))
+        messages = LEGAL_QA_PROMPT.format_messages(question=state["question"], sources=state.get("sources", []))
         if not state.get("sources"):
             return {"answer": "未找到直接法律依据，无法给出确定性回答。"}
+        if self._llm is not None:
+            response = await invoke_chat(self._llm, messages)
+            content = response.content if isinstance(response.content, str) else ""
+            if content.strip():
+                return {"answer": content.strip()}
         return {"answer": f"依据已检索到的法律材料，针对“{state['question']}”应结合具体合同事实判断。"}
 
     async def validate_citations(self, state: LegalQaState) -> LegalQaState:

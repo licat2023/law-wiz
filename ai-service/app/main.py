@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 
 from app.agent.exceptions import AgentNotFoundError
-from app.api.exception_handlers import agent_not_found_handler
+from app.api.exception_handlers import agent_not_found_handler, deepseek_invocation_handler
 from app.api.v1.agent import router
+from app.llm.deepseek import DeepSeekInvocationError
 
 app = FastAPI(title="智法宝 AI Service")
 
@@ -11,6 +12,7 @@ app.add_exception_handler(
     AgentNotFoundError,
     agent_not_found_handler,
 )
+app.add_exception_handler(DeepSeekInvocationError, deepseek_invocation_handler)
 
 # 注册路由
 app.include_router(router)
