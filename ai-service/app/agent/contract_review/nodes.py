@@ -15,8 +15,12 @@ class ContractReviewNodes:
 
     async def extract_terms(self, state: ContractReviewState) -> ContractReviewState:
         if self._llm is not None:
-            output = await invoke_chat(self._llm.with_structured_output(ContractTerms),
-                f"{CONTRACT_TERM_EXTRACTION_PROMPT}\n\n合同全文：\n{state['plain_text'][:12000]}"
+            # DeepSeek 的 Chat Completions API 只支持 `json_object`，不支持
+            # LangChain 默认的 `json_schema` response_format。json_mode 仍由
+            # Pydantic 解析为 ContractTerms，且 prompt 明确要求 JSON。
+            output = await invoke_chat(
+                self._llm.with_structured_output(ContractTerms, method="json_mode"),
+                f"{CONTRACT_TERM_EXTRACTION_PROMPT}\n\n合同全文：\n{state['plain_text'][:12000]}",
             )
             return {"extracted_terms": output.model_dump()}
         return {"extracted_terms": {"text_length": len(state["plain_text"])}}
@@ -40,12 +44,13 @@ class ContractReviewNodes:
     async def analyze_risks(self, state: ContractReviewState) -> ContractReviewState:
         if self._llm is not None:
             laws = "\n".join(source.quoted_text or "" for source in state.get("laws", []))
-            output = await invoke_chat(self._llm.with_structured_output(ContractRiskAnalysis),
+            output = await invoke_chat(
+                self._llm.with_structured_output(ContractRiskAnalysis, method="json_mode"),
                 f"{CONTRACT_RISK_ANALYSIS_PROMPT}\n\n"
                 f"合同条款：{state.get('extracted_terms', {})}\n"
                 f"法律依据：{laws or '未检索到'}\n"
                 f"风险规则：{state.get('rules', [])}\n"
-                f"合同全文：{state['plain_text'][:12000]}"
+                f"合同全文：{state['plain_text'][:12000]}",
             )
             return {"risk_points": output.risk_points}
         return {"risk_points": [RiskPoint(**rule) for rule in state.get("rules", [])]}
