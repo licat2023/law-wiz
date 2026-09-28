@@ -45,6 +45,6 @@ uv run uvicorn app.main:app --reload --port 8001
 
 ```powershell
 uv run --extra dev ruff check .
-uv run --extra dev python -m unittest discover -s tests
+uv run --extra dev pytest
 uv run --extra dev python -m compileall -q app
 ```
