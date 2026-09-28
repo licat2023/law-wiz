@@ -66,6 +66,27 @@ async def test_ai_service_client_returns_valid_agent_result(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_ai_service_client_uses_configured_timeout(monkeypatch) -> None:
+    """Adapter 的超时预算必须能覆盖真实的多次模型调用。"""
+    from app.infra import ai_service
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ai_service_base_url", "configured-for-test")
+    monkeypatch.setattr(settings, "ai_service_timeout_seconds", 75.0)
+    captured: dict[str, object] = {}
+
+    def build_client(**kwargs):
+        captured.update(kwargs)
+        return _Client(_Response(200, {"requestId": "qa-request", "data": {"answer": "测试", "citations": []}}))
+
+    monkeypatch.setattr(ai_service.httpx, "AsyncClient", build_client)
+
+    await AiServiceClient().legal_qa(question="测试", user_id=1, session_id=2, request_id="qa-request")
+
+    assert captured["timeout"] == 75.0
+
+
+@pytest.mark.asyncio
 async def test_ai_service_client_converts_timeout_and_connection_failure(monkeypatch) -> None:
     monkeypatch.setattr(get_settings(), "ai_service_base_url", "configured-for-test")
     for error in (httpx.TimeoutException("timeout"), httpx.ConnectError("offline")):
