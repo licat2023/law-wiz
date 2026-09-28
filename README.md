@@ -44,7 +44,7 @@
 
 | 分期 | 范围 | 状态 |
 | --- | --- | --- |
-| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | 设计中，尚未开工 |
+| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | MVP 已实现，待真实环境端到端验收 |
 | P2 二期 | 部署运维 + M4 区块链证据存证 + M5 个人中心 | 后期 |
 | P3 三期 | M6 电子合同生成与签署 + M7 电子印章与签名管理 | 后期 |
 | P4 四期 | 多方签署、到期提醒、分级授权、停用销毁、安全审计 | 后期 |
@@ -79,6 +79,10 @@ law-wiz/
 │   │   ├── models/   全部 15 张表的 ORM 模型（集中，保证 Alembic 不漏表）
 │   │   └── slices/   **功能纵切面**，每个含 schemas / service / router
 │   └── tests/
+├── ai-service/       独立 Agent 能力服务（LangGraph + LangChain）
+│   ├── app/agent/    BaseAgent、Runtime、Registry、Legal QA、合同审查 Graph
+│   ├── app/tools/    Backend Internal API Tool / Fake Tool
+│   └── tests/
 ├── frontend/         Vue 3 + Element Plus + Vite
 │   └── src/
 │       ├── api/      接口封装与类型定义（与后端契约镜像）
@@ -91,9 +95,52 @@ law-wiz/
 └── tools/            一次性脚本与渲染工具
 ```
 
-> **当前仓库只有目录骨架、设计文档与依赖声明，尚无实现代码。**
-> 上面列出的是目标结构；切片如何划分由团队认领时决定（见
-> [`backend/app/slices/README.md`](backend/app/slices/README.md)）。
+## 当前 MVP 架构与调用链
+
+```
+Frontend → Backend → AI-Service → AgentRuntime → AgentRegistry
+         → LegalQaAgent / ContractReviewAgent → LangGraph Workflow
+         → LangChain LLM / Tool → Backend Internal API → 数据持久化
+```
+
+- Backend 负责鉴权、文件、会话、任务、事务、风险点/引用/报告持久化；AI-Service 不直接访问业务数据库。
+- AI-Service 注册 `legal_qa`、`contract_review` 与保留的 `demo` Agent；通用入口为 `POST /api/v1/agent/invoke`。
+- Legal QA：`prepare_query → retrieve_law → generate_answer → validate_citations → finalize`。
+- 合同审查：`prepare_contract → extract_terms → retrieve_laws → retrieve_risk_rules → analyze_risks → validate_sources → finalize`。
+- 服务间数据经 `X-Internal-Service-Token` 认证的 Backend Internal API 获取；真实业务输入（例如问题、`plain_text`、任务标识）由 Backend 直接传入。
+
+## 当前 MVP 能力与限制
+
+- Legal QA：法规检索、可溯源引用、结构化答案持久化。
+- 合同审查：可提取文本的 PDF / DOCX / UTF-8 TXT → 风险点与 PDF 报告。
+- RAG：核心法规种子和风险规则可通过 `backend/tools/import_core_legal_corpus.py` 幂等导入；Chroma 支持持久化索引。
+- LLM：AI-Service 经 LangChain 调用 DeepSeek；密钥只读系统环境变量，自动化测试使用 Fake/Stub。
+- OCR：仅保留 `infra/ocr.py` 扩展点；扫描件与图片合同当前返回明确失败提示，不进入 Agent。
+- 未完成：真实 MySQL/Redis/Backend/AI-Service 联调、完整前后端 Demo、OCR 及 M4–M7。
+
+## 本地启动与验证
+
+1. Backend：进入 `backend/`，使用 Python 3.14 标准构建执行 `uv sync --extra dev --extra vector`；起 MySQL/Redis 后执行 `uv run alembic upgrade head`，再运行 `uv run uvicorn app.main:app --reload --port 8000`。
+2. AI-Service：进入 `ai-service/`，执行 `uv sync --extra dev`，以环境变量提供 `AI_SERVICE_BACKEND_BASE_URL`、`AI_SERVICE_BACKEND_TOKEN`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，再运行 `uv run uvicorn app.main:app --reload --port 8001`。
+3. Frontend：进入 `frontend/`，执行 `pnpm install --frozen-lockfile` 与 `pnpm dev`。
+
+所有变量的名称见 `backend/.env.example` 与 `ai-service/.env.example`；示例文件不包含凭据，`.env` 不得提交。
+
+常用验证命令：
+
+```powershell
+# backend/
+uv run --extra dev --extra vector ruff check .
+uv run --extra dev --extra vector pytest
+
+# ai-service/
+uv run --extra dev ruff check .
+uv run --extra dev python -m unittest discover -s tests
+
+# frontend/
+pnpm run lint
+pnpm run build
+```
 
 **为什么按纵切面分目录而不是 `models/ services/ api/`**：本项目的分工是「一人负责一条
 端到端链路」（ADR-0001）。技术分层会让每个功能改动横跨三个目录，PR 冲突面大。
