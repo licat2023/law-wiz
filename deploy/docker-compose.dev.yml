@@ -19,7 +19,12 @@ services:
       # ⚠️ 必须含 STRICT_TRANS_TABLES：非严格模式下超长值会被**静默截断**（docs/04 §2.2）
       - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
       - --innodb_buffer_pool_size=128M
+      # ⚠️ 时区固定 +08:00：应用存的是**北京时间**（core/clock.py），而 DDL 里
+      #    `CURRENT_TIMESTAMP(3)`（默认值与 ON UPDATE）取的是**会话时区**。
+      #    服务器时区不是 +08:00 时，同一个库里会混进两种时间口径。
+      - --default-time-zone=+08:00
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: ${LAWWIZ_MYSQL_ROOT_PASSWORD:-root-not-for-prod}
       MYSQL_DATABASE: ${LAWWIZ_DB_NAME:-law_wiz}
       MYSQL_USER: ${LAWWIZ_DB_USER:-lawwiz}

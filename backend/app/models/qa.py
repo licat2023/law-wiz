@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Integer, Numeric, String, Text
+from sqlalchemy import Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import now_beijing
@@ -32,7 +32,11 @@ class QaSession(Base, TimestampMixin):
     """一次多轮对话。"""
 
     __tablename__ = "qa_session"
-    __table_args__ = (MYSQL_TABLE_ARGS,)
+    __table_args__ = (
+        # 会话列表按最近消息时间排序（04-数据库设计 §5.13）
+        Index("idx_qa_session_user", "user_id", "last_message_at"),
+        MYSQL_TABLE_ARGS,
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BIGINT_PK, fk("user.id", name="fk_qa_session_user"), nullable=False)
@@ -55,7 +59,11 @@ class QaMessage(Base):
     """
 
     __tablename__ = "qa_message"
-    __table_args__ = (MYSQL_TABLE_ARGS,)
+    __table_args__ = (
+        # 会话详情按会话取消息并稳定分页（04-数据库设计 §5.14）
+        Index("idx_qa_message_session", "qa_session_id", "id"),
+        MYSQL_TABLE_ARGS,
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     qa_session_id: Mapped[int] = mapped_column(

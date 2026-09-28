@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import now_beijing
@@ -39,7 +39,11 @@ class ReviewTask(Base, TimestampMixin):
     """一次合同审查的执行实例。"""
 
     __tablename__ = "review_task"
-    __table_args__ = (MYSQL_TABLE_ARGS,)
+    __table_args__ = (
+        # 审查历史列表按「我的 + 状态」过滤并按时间排序（04-数据库设计 §5.6）
+        Index("idx_review_task_user_status", "user_id", "status", "created_at"),
+        MYSQL_TABLE_ARGS,
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     # 允许为空：支持"仅上传未建合同"的轻量审查
@@ -79,7 +83,11 @@ class RiskPoint(Base, TimestampMixin):
     """单条风险点。"""
 
     __tablename__ = "risk_point"
-    __table_args__ = (MYSQL_TABLE_ARGS,)
+    __table_args__ = (
+        # 风险点按任务查询并按严重度排序（04-数据库设计 §5.7）
+        Index("idx_risk_point_task_level", "review_task_id", "risk_level"),
+        MYSQL_TABLE_ARGS,
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     review_task_id: Mapped[int] = mapped_column(

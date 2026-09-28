@@ -58,7 +58,7 @@ async def create_document(db: AsyncSession, payload: CreateDocumentRequest) -> D
     分块是全文的唯一载体；若创建时不落块，索引阶段就无据可切。
     """
     content = payload.content
-    digest = sha256_of(content.encode("utf-8"))
+    digest = await asyncio.to_thread(sha256_of, content.encode("utf-8"))
 
     existing = await db.scalar(
         select(KbDocument.id).where(KbDocument.content_hash == digest, KbDocument.deleted_at.is_(None))
@@ -296,8 +296,8 @@ async def search(
     from app.infra import vector
 
     # 多取一些候选：过滤（类型/分级/废止）会淘汰一部分，取少了会凑不满 top_k
-    # Chroma 的本地客户端会进行磁盘 I/O；服务层处于事件循环中，必须在线程
-    # 中执行，避免大语料检索阻塞其它请求。
+    # 内存检索是 CPU 密集调用，Chroma 还会产生本地磁盘 I/O；服务层处于事件
+    # 循环中，必须在线程执行，避免大语料检索阻塞其它请求。
     hits = await asyncio.to_thread(vector.search, query, min(top_k * 5, 100))
     if not hits:
         return KbSearchData(query=query, items=[])

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Integer, String, UniqueConstraint
+from sqlalchemy import Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import now_beijing
@@ -37,7 +37,11 @@ class Contract(Base, TimestampMixin):
     """
 
     __tablename__ = "contract"
-    __table_args__ = (MYSQL_TABLE_ARGS,)
+    __table_args__ = (
+        # 合同列表页按「我的 + 状态」过滤并按时间排序（04-数据库设计 §5.4）
+        Index("idx_contract_owner_status", "owner_id", "status", "created_at"),
+        MYSQL_TABLE_ARGS,
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     owner_id: Mapped[int] = mapped_column(BIGINT_PK, fk("user.id", name="fk_contract_owner"), nullable=False)

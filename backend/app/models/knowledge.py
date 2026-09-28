@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Date, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import now_beijing
@@ -42,6 +42,17 @@ class KbDocument(Base, TimestampMixin):
     __tablename__ = "kb_document"
     __table_args__ = (
         UniqueConstraint("content_hash", name="uk_kb_document_hash"),
+        # ⚠️ 用 `length()` 而不是文档里的 `CHAR_LENGTH()`：两者对**十六进制字符串**
+        # 等价（逐字节即逐字符），而 `CHAR_LENGTH` 只有 MySQL 有 —— 测试用 SQLite
+        # 从 metadata 建表，写死 MySQL 函数会让建表直接失败（04-数据库设计 §5.9 的
+        # 语义不变：哈希必须是 64 位十六进制）。
+        # ⚠️ 名字只写后缀：`NAMING_CONVENTION` 的 ck 规则是
+        # `ck_%(table_name)s_%(constraint_name)s`，因此实际约束名是
+        # `ck_kb_document_hash_len`（与 04-数据库设计 §5.9 一致）。
+        CheckConstraint("length(content_hash) = 64", name="hash_len"),
+        Index("idx_kb_document_type_tier", "doc_type", "corpus_tier"),
+        Index("idx_kb_document_article", "law_name", "article_no"),
+        Index("idx_kb_document_status", "index_status"),
         MYSQL_TABLE_ARGS,
     )
 
@@ -60,7 +71,7 @@ class KbDocument(Base, TimestampMixin):
     revision: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
     source: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
     source_url: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
-    # 内容 SHA-256（64 位十六进制）。DDL 中另有 CHECK (CHAR_LENGTH = 64) 兜底
+    # 内容 SHA-256（64 位十六进制）。建表时另有 CHECK 兜底（见 __table_args__）
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     char_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     index_status: Mapped[str] = mapped_column(
@@ -86,6 +97,8 @@ class KbChunk(Base):
     __tablename__ = "kb_chunk"
     __table_args__ = (
         UniqueConstraint("kb_document_id", "chunk_no", name="uk_kb_chunk_doc_no"),
+        # 按向量库 ID 反查分块（引用溯源时用，04-数据库设计 §5.10）
+        Index("idx_kb_chunk_vector", "vector_id"),
         MYSQL_TABLE_ARGS,
     )
 
@@ -130,6 +143,8 @@ class RiskRule(Base, TimestampMixin):
     __tablename__ = "risk_rule"
     __table_args__ = (
         UniqueConstraint("rule_code", name="uk_risk_rule_code"),
+        # 规则匹配只取「启用中」的规则，按严重度排序（04-数据库设计 §5.11）
+        Index("idx_risk_rule_active", "is_active", "risk_level"),
         MYSQL_TABLE_ARGS,
     )
 

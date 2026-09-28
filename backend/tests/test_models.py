@@ -7,10 +7,32 @@ MySQL 不支持 —— 只跑 SQLite 的用例看不出差别。实测教训：C
 
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 import app.models  # noqa: F401  确保全部模型已注册到 metadata
 from app.infra.db.base import Base
+from app.models.knowledge import KbDocument
 
 _TIMESTAMP_COLUMNS = ("created_at", "updated_at", "generated_at")
+
+# 04-数据库设计 明确定义、且**只有复合/非外键列**因而不会被外键自动索引覆盖的索引。
+# 名字与模型 `__table_args__` 里声明的一致；少一个就说明有人从模型里删掉了它 ——
+# 那会让 `create_all` 出来的测试库没有该索引，而迁移库有，两边形状不再一致。
+_EXPECTED_INDEXES = {
+    ("contract", "idx_contract_owner_status"),
+    ("kb_chunk", "idx_kb_chunk_vector"),
+    ("kb_document", "idx_kb_document_article"),
+    ("kb_document", "idx_kb_document_status"),
+    ("kb_document", "idx_kb_document_type_tier"),
+    ("qa_message", "idx_qa_message_session"),
+    ("qa_session", "idx_qa_session_user"),
+    ("review_task", "idx_review_task_user_status"),
+    ("risk_point", "idx_risk_point_task_level"),
+    ("risk_rule", "idx_risk_rule_active"),
+}
 
 
 def test_timestamp_columns_have_python_side_values() -> None:
@@ -36,3 +58,43 @@ def test_timestamp_columns_have_python_side_values() -> None:
                     f"{table.name}.updated_at 缺少 onupdate：更新时不会刷新（docs/04 §2.3 要求）"
                 )
     assert checked >= 15, f"应覆盖全部时间戳列，实际只检查到 {checked} 个（模型是否漏注册？）"
+
+
+def test_documented_indexes_are_declared_on_the_models() -> None:
+    """docs/04 定义的索引必须在**模型**里，不能只写在迁移脚本里。
+
+    迁移脚本只影响真实数据库；而测试库是 `create_all` 从模型建的 ——
+    模型漏声明时，测试库与生产库的形状就悄悄分叉了。
+    """
+    declared = {
+        (table.name, index.name) for table in Base.metadata.tables.values() for index in table.indexes
+    }
+    missing = _EXPECTED_INDEXES - declared
+    assert not missing, f"模型缺少这些索引：{sorted(missing)}"
+
+
+def test_kb_document_hash_length_check_is_enforced(engine) -> None:
+    """`content_hash` 必须是 64 位十六进制 —— 由 CHECK 约束兜底（docs/04 §4.5）。
+
+    契约层面这个值由应用生成，但 CHECK 是防"绕过应用写库"的最后一道：
+    它不止是 DDL 里的一行字，本用例确认它**真的会拒绝**非法值。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    async def _insert(hash_value: str) -> None:
+        async with factory() as db:
+            db.add(
+                KbDocument(
+                    doc_type="law",
+                    corpus_tier=1,
+                    title="哈希长度校验",
+                    content_hash=hash_value,
+                )
+            )
+            await db.commit()
+
+    with pytest.raises(IntegrityError):
+        asyncio.run(_insert("abc"))
+    asyncio.run(_insert("a" * 64))  # 合法值必须能写入

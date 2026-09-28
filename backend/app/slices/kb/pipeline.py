@@ -64,6 +64,8 @@ async def run_index_pipeline(document_id: int) -> None:
 
             # 只把**分块 ID 与文本**交给向量层：它不知道关系库的结构，
             # 这样更换向量实现时关系型数据无需迁移（ADR-0004）。
+            # 向量化既会计算嵌入也可能访问 Chroma 磁盘，必须在线程中执行，
+            # 以避免阻塞处理 BackgroundTasks 的事件循环。
             await asyncio.to_thread(
                 vector.index_document,
                 document.id,
