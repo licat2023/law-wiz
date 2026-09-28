@@ -44,7 +44,7 @@
 
 | 分期 | 范围 | 状态 |
 | --- | --- | --- |
-| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | MVP 已实现，待真实环境端到端验收 |
+| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | MVP 已实现，已完成本地真实环境端到端验收 |
 | P2 二期 | 部署运维 + M4 区块链证据存证 + M5 个人中心 | 后期 |
 | P3 三期 | M6 电子合同生成与签署 + M7 电子印章与签名管理 | 后期 |
 | P4 四期 | 多方签署、到期提醒、分级授权、停用销毁、安全审计 | 后期 |
@@ -65,6 +65,7 @@
 | [docs/03-概要设计.md](docs/03-概要设计.md) | 系统分层架构、模块分解与交付边界、数据设计、关键设计、部署拓扑、团队分工 |
 | [docs/04-数据库设计.md](docs/04-数据库设计.md) | 15 张一期表的字段定义、索引与约束、可执行建表 DDL（**已在 MySQL 8.0.46 与 9.7.2 两个版本实测通过**）、备份与安全策略 |
 | [docs/05-接口设计.md](docs/05-接口设计.md) | 一期全部接口的完整契约、统一响应体与错误码、双令牌鉴权、异步任务轮询规则、外部能力接入约定 |
+| [docs/06-MVP演示指南.md](docs/06-MVP演示指南.md) | P1 答辩演示顺序、架构说明、预期结果与已知边界 |
 | [docs/adr/](docs/adr/) | 架构决策记录：不可逆决策及其被否决的替代方案 |
 
 ## 代码结构
@@ -113,10 +114,11 @@ Frontend → Backend → AI-Service → AgentRuntime → AgentRegistry
 
 - Legal QA：法规检索、可溯源引用、结构化答案持久化。
 - 合同审查：可提取文本的 PDF / DOCX / UTF-8 TXT → 风险点与 PDF 报告。
-- RAG：核心法规种子和风险规则可通过 `backend/tools/import_core_legal_corpus.py` 幂等导入；Chroma 支持持久化索引。
+- RAG：核心法规种子和风险规则可通过 `backend/tools/import_core_legal_corpus.py` 幂等导入；Chroma 支持持久化索引。当前嵌入仍是确定性开发实现，生产级语义 Embedding Provider 属后续工作。
 - LLM：AI-Service 经 LangChain 调用 DeepSeek；密钥只读系统环境变量，自动化测试使用 Fake/Stub。
 - OCR：仅保留 `infra/ocr.py` 扩展点；扫描件与图片合同当前返回明确失败提示，不进入 Agent。
-- 未完成：真实 MySQL/Redis/Backend/AI-Service 联调、完整前后端 Demo、OCR 及 M4–M7。
+- 已完成：本地 MySQL / Redis / Chroma、Frontend / Backend / AI-Service、真实 DeepSeek 的两条端到端链路验收。
+- 后续：部署环境验收、OCR、生产级语义 Embedding Provider，以及 M4–M7。
 
 ## 本地启动与验证
 
@@ -135,7 +137,7 @@ uv run --extra dev --extra vector pytest
 
 # ai-service/
 uv run --extra dev ruff check .
-uv run --extra dev python -m unittest discover -s tests
+uv run --extra dev pytest
 
 # frontend/
 pnpm run lint
