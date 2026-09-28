@@ -1,37 +1,50 @@
 # 智法宝 AI Service
 
-这是智法宝的轻量级 FastAPI Agent 服务原型。它将 HTTP 接口、业务编排和具体 Agent 实现分层，便于后续替换 `DemoAgent` 为合同审查、问答等真实能力。
+独立于业务后端的 Agent 能力服务。它负责 AI 推理、LangGraph 工作流、LangChain 模型与 Tool；不直接访问 Backend 业务数据库。
 
 ## 代码结构与职责
 
-- `app/main.py`：FastAPI 应用入口；注册 v1 Agent 路由。
-- `app/api/v1/agent.py`：HTTP 适配层；接收请求模型、调用服务，并转换为响应模型。
-- `app/schemas/agent.py`：Pydantic 请求/响应契约；`requestId` 与 `agentCode` 是面向 API 的别名，仍兼容 Python 的蛇形字段名。
-- `app/service/agent_service.py`：业务服务层；创建注册中心与运行时，并将调用参数交给运行时处理。
-- `app/agent/registry.py`：Agent 注册中心；维护 `agent_code -> Agent` 的映射，当前注册 `demo`。
-- `app/agent/runtime.py`：调度层；按 `agent_code` 查找 Agent 并调用其统一的 `invoke` 契约；当 Agent 不存在时抛出领域错误。
-- `app/agent/core/base_agent.py`：抽象接口；规定所有 Agent 都实现 `invoke(message, scene)`。
-- `app/agent/core/demo_agent.py`：可运行的示例实现；用于验证从 API 到 Agent 的整条调用链。
+- `app/main.py`、`app/api/v1/agent.py`：FastAPI 通用入口 `POST /api/v1/agent/invoke`。
+- `app/service/agent_service.py`、`app/agent/core/`：AgentService、Runtime、Registry、BaseAgent、DemoAgent。
+- `app/agent/legal_qa/`：薄 Agent 入口、State、Graph、Nodes、Prompts；流程为 `prepare_query → retrieve_law → generate_answer → validate_citations → finalize`。
+- `app/agent/contract_review/`：薄 Agent 入口、State、Graph、Nodes、Prompts；流程为 `prepare_contract → extract_terms → retrieve_laws → retrieve_risk_rules → analyze_risks → validate_sources → finalize`。
+- `app/tools/backend.py`：BackendClient、法规检索/风险规则 Tool 与自动化测试用 Fake Tool。
+- `app/llm/deepseek.py`：DeepSeek 的唯一 LangChain 接入点；日志不记录 API Key。
+- `app/schemas/contracts.py`：AgentContext、Input/Result、Citation、RiskPoint 等稳定契约。
 
-调用链：`POST /api/v1/agent/test` → `AgentService` → `AgentRuntime` → `AgentRegistry` → `BaseAgent.invoke`。
+调用链：`POST /api/v1/agent/invoke` → `AgentService` → `AgentRuntime` → `AgentRegistry` → `BaseAgent.invoke(input, context)`。
 
 ## 运行
 
 安装依赖后，从 `ai-service` 目录启动：
 
 ```bash
-uvicorn app.main:app --reload
+uv sync --extra dev
+uv run uvicorn app.main:app --reload --port 8001
 ```
 
 请求示例：
 
 ```json
 {
-  "requestId": "demo-001",
-  "agentCode": "demo",
-  "message": "请测试服务",
-  "scene": "CONNECTIVITY_TEST"
+  "agentCode": "legal_qa",
+  "input": {"question": "违约责任如何承担？"},
+  "context": {"requestId": "request-001", "userId": "1", "sessionId": "2"}
 }
 ```
 
-`agentCode` 可省略，此时服务默认调用 `demo`。
+`contract_review` 的 `input` 为 `{ "plain_text": "..." }`。文件解析、OCR 与业务持久化始终由 Backend 负责；Agent 只接收已经文本化的合同。
+
+## 环境变量与测试
+
+从 `.env.example` 复制变量名到本地环境或 `.env`，不得提交真实值：
+
+- `AI_SERVICE_BACKEND_BASE_URL`、`AI_SERVICE_BACKEND_TOKEN`：访问受保护 Backend Internal API。
+- `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`：真实模型配置；未完整配置时使用 Fake/离线能力，测试不依赖网络。
+- `AI_SERVICE_REQUEST_TIMEOUT_SECONDS`：真实模型调用超时，默认 60 秒。
+
+```powershell
+uv run --extra dev ruff check .
+uv run --extra dev python -m unittest discover -s tests
+uv run --extra dev python -m compileall -q app
+```
