@@ -70,7 +70,7 @@ export function getReviewResult(taskId: string) {
 
 /** C-04 下载审查报告；返回可直接用于 <a download> 的地址 */
 export function reviewReportUrl(taskId: string, format: 'pdf' = 'pdf') {
-  const base = import.meta.env.VITE_API_BASE ?? '/api/v1'
+  const base = import.meta.env.VITE_API_BASE ?? '/api'
   return `${base}/reviews/${taskId}/report?format=${format}`
 }
 

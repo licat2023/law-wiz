@@ -3,58 +3,31 @@
 面向在本仓库工作的 AI 代理与协作者的约定。**只写对未来任务有用的信息**：
 操作历史、已关闭的 Issue 编号、临时绕过手段属于 commit message，不属于本文件。
 
-> **当前状态**：六个纵切面（health / auth / files / review / kb / qa）与前端均已落地，
-> 后端是**异步栈**：SQLAlchemy `AsyncSession` + aiomysql，Redis 走 `redis.asyncio`，
-> 后台流水线为 `async def`（由 `BackgroundTasks` 在事件循环中执行）。
-> 15 张表与两条 Alembic 迁移已入库；AI 能力（llm / ocr / embedding / vector）当前是
-> stub / fake 实现，接真实厂商只需替换 `app/infra/` 里的封装。
-> 测试跑 SQLite（`aiosqlite`）+ Redis 内存替身，**不需要起 MySQL 或 Redis**。
+业务 FastAPI 运行合同审查与法律问答 Agent。知识库独立运行，持有文档、索引和 Chroma。两个后端各用自己的数据库和 Python 环境。
+
+重构或跨目录修改前，维护 [施工清单](docs/FILE_MAP.md) 中的目录职责、文件范围、状态和验证结果。
 
 ## 仓库布局
 
-monorepo，四个顶层目录各司其职：
-
-| 目录 | 内容 |
+| 目录 | 职责 |
 | --- | --- |
-| `backend/` | FastAPI（Python 3.14）。`app/` 按**功能纵切面**组织，不按技术分层 |
-| `frontend/` | Vue 3 + Element Plus + Vite 单页应用 |
-| `deploy/` | 部署编排与说明（`docker-compose.dev.yml` / `docker-compose.prod.yml`） |
-| `docs/` | 设计文档 01–05、`adr/`、`assets/`（插图的 Mermaid 单一真源） |
-| `tools/` | 一次性脚本与渲染工具 |
+| `backend/` | 业务 FastAPI，`app/domains/` 按领域组织 |
+| `frontend/` | 智法宝用户界面 |
+| `knowledge_base/backend/` | 知识库 FastAPI、文档入库、索引和检索 |
+| `knowledge_base/frontend/` | 知识库管理界面 |
+| `deploy/` | 部署编排与数据库账号初始化 |
+| `docs/` | 设计、接口、架构决策和施工清单 |
+| `tools/` | 文档辅助工具 |
 
-`backend/app/` 的分层：`core/`（配置、错误码、响应体、时钟、密码与令牌、幂等缓存）、
-`api/`（横切依赖 `deps`、中间件、异常处理器、限流依赖）、
-`infra/`（数据库会话、Redis、存储、并发闸门，以及 AI 能力封装 llm / ocr / embedding / vector / parsing）、
-`models/`（15 张表的 ORM，**集中登记**以保证 Alembic 不漏表）、
-`slices/`（纵切面，每个含 `schemas.py` / `service.py` / `router.py`；异步流水线的切片另含 `pipeline.py`）。
+`contracts/` 管合同版本和正文，`contract_review/` 管审查任务、规则和报告。两个 Agent 各自归审查或问答领域。新增业务 ORM 模型须登记到 `app/infrastructure/database/models.py`。知识库模型登记在 `app/infrastructure/models.py`。
 
-新增切片的步骤见 `backend/app/slices/README.md`。**跨切片共享代码只能进 `core/` / `infra/` / `models/`**，
-不允许两个切片互相 import 对方的 `service.py`。
+业务后端通过统一 HTTP 客户端访问知识库。知识库解析入库文件、切分并发布索引，业务后端本地提取审查合同的正文。知识库生产嵌入使用远程服务，内嵌 Chroma 由单 worker 持有。
 
 ## 常用命令
 
-**后端** —— `--extra dev` 不可省：`ruff` 与 `pytest` 都在该 extra 里，漏掉会得到 `program not found`。
+各后端执行 `uv sync --frozen --extra dev`、`uv run --extra dev ruff check app` 和 `uv run --extra dev ruff format --check app`。各前端执行 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm run build`。
 
-```bash
-cd backend
-uv sync --extra dev                        # 锁文件已入库；加 --frozen 可校验它没被改脏
-uv run --extra dev ruff check .
-uv run --extra dev ruff format --check .
-uv run --extra dev pytest                  # 测试用 SQLite + Redis 内存替身，无需起容器
-uv run alembic upgrade head                # 建表/迁移（需先起 MySQL）
-uv run uvicorn app.main:app --reload --port 8000
-```
-
-**前端**
-
-```bash
-cd frontend
-pnpm install --frozen-lockfile
-pnpm dev                                   # http://localhost:5173，/api 已代理到 127.0.0.1:8000
-pnpm run lint
-pnpm run format:check
-pnpm run build                              # = vue-tsc --noEmit && vite build
-```
+空库初始化见 [业务后端](backend/README.md)、[知识库](knowledge_base/README.md) 和 [部署说明](deploy/README.md)。通过 [Demo 指南](docs/06-MVP演示指南.md) 核对入库、审查报告与问答引用。
 
 ## 硬性约束
 
@@ -64,7 +37,7 @@ pnpm run build                              # = vue-tsc --noEmit && vite build
   会选中它，而它装不上 `chromadb`，报错却指向 Rust。建环境时写解释器的绝对路径；
   另建议在 `app/__init__.py` 里做 `Py_GIL_DISABLED` 预检。见 ADR-0009。
 - **后端依赖不得出现 `paddlepaddle` / `torch` / `paddleocr`**。本地 OCR 需 1.2–2 GB 内存，
-  容器会被 OOM Killer 静默杀掉，表现为"启动后无故退出"。OCR 走云端 API。
+  容器会被 OOM Killer 静默杀掉，表现为"启动后无故退出"。当前不实现 OCR；后续接入只考虑云端 API。
 - **每个容器必须设 `mem_limit`**。部署主机内存极紧且已承载其它服务，不设上限会连带拖垮同机应用。
 - **MySQL 固定 `mysql:9.7`，不用 `latest`**。见 ADR-0008。
 - **`.gitignore` 里 `models/` 必须保持锚定为 `/models/`**。写成不带斜杠的 `models/` 会连带忽略
@@ -75,17 +48,17 @@ pnpm run build                              # = vue-tsc --noEmit && vite build
 - **AI 相关接口必须带 `Idempotency-Key`**（`POST /reviews`、`POST /qa/sessions/{id}/messages`）。
 - **同一个外部能力只在一处封装**，其它地方复用该封装。一期**不建 Provider 接口体系**
   （ADR-0012）—— 业务代码里不要出现同一个厂商 SDK 的分散调用，那会让将来真要替换时无处下手。
-- **数据库访问一律走异步栈**：`AsyncSession` + aiomysql（`infra/db/session.py`），
+- **数据库访问一律走异步栈**：`AsyncSession` + aiomysql（`infrastructure/database/session.py`），
   路由 / 服务 / 流水线统一 `await`；**不要**引入同步 `Session`、`create_engine` 或 pymysql 驱动
   —— 异步上下文里用同步会话会抛 `MissingGreenlet`，同步驱动会阻塞事件循环。Redis 同理，用 `redis.asyncio`。
 - **不要访问 ORM 关系属性**（`task.report`、`session.messages` 之类）：异步会话下它会触发
   隐式 IO 抛 `MissingGreenlet`，改用显式 `select(...)` 查询。
-- **时间戳列必须同时给 Python 侧取值**（`default=` / `onupdate=`，见 `infra/db/base.py`）：
+- **时间戳列必须同时给 Python 侧取值**（`default=` / `onupdate=`，见 `infrastructure/database/base.py`）：
   MySQL 不支持 `INSERT ... RETURNING`，只写 `server_default` 的话，插入后读该列会触发
   隐式 SELECT —— 异步会话里同样抛 `MissingGreenlet`，而 **SQLite 测试测不出来**
   （SQLite 支持 RETURNING），只有连真实 MySQL 才暴露。实测：C-01 曾返回 50000 而 143 个用例全绿。
 - **重活一律过 `asyncio.to_thread`**：bcrypt 口令哈希、PDF 解析与报告生成、向量检索、
-  大模型 / OCR 调用、本地磁盘读写都已移出事件循环（`core/security.py`、各切片的
+  同步计算与外部 SDK 调用、本地磁盘读写都已移出事件循环（`domains/auth/security.py`、各领域的
   `service.py` / `pipeline.py`）。**新增这类调用时照做** —— 在 `async def` 里直接同步调用
   会占住事件循环（期间所有请求排队），而**功能测试不会发现**。
 
@@ -118,7 +91,8 @@ git archive --format=tar HEAD | tar -x -C <临时目录>
 - **`git push` 在本机的 TLS 配置**：全局 `~/.gitconfig` 设了 `http.sslBackend = openssl`，它在本机
   连 GitHub 会失败（`unexpected eof while reading`）。本仓库已设仓库级 `schannel` 覆盖。
   克隆到新机器后若推送失败，先检查这一项。
-- **命令要在各自目录下执行**：`uv` 命令在 `backend/`，`pnpm` 命令在 `frontend/`。
+- **命令要在各自项目目录执行**，不要共用业务后端与知识库的 Python 环境。
+- **用 `law-wiz.code-workspace` 打开工作区**：两个后端的顶层包都叫 `app`，各自使用独立的解释器和分析范围。
 - 仓库可能公开：**凭据、主机地址、端口、连接方式一律不写入仓库**，理由见根 `README.md` 的「凭据纪律」。
 
 ## 文档权威来源

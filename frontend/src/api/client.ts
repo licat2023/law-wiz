@@ -22,7 +22,7 @@ import { ref } from 'vue'
 
 import { ErrorCode, type ApiResponse, type ErrorDetails, type LoginData } from './types'
 
-const BASE_URL = import.meta.env.VITE_API_BASE ?? '/api/v1'
+const BASE_URL = import.meta.env.VITE_API_BASE ?? '/api'
 
 /** 带业务错误码的异常。界面可据 `code` 决定展示方式 */
 export class ApiError extends Error {

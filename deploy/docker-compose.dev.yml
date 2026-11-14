@@ -29,10 +29,14 @@ services:
       MYSQL_DATABASE: ${LAWWIZ_DB_NAME:-law_wiz}
       MYSQL_USER: ${LAWWIZ_DB_USER:-lawwiz}
       MYSQL_PASSWORD: ${LAWWIZ_DB_PASSWORD:-changeme}
+      KB_MYSQL_DATABASE: ${KB_MYSQL_DATABASE:-law_wiz_kb}
+      KB_MYSQL_USER: ${KB_MYSQL_USER:-lawwiz_kb}
+      KB_MYSQL_PASSWORD: ${KB_MYSQL_PASSWORD:-dev-kb-only}
     ports:
       - "${LAWWIZ_DEV_DB_PORT:-3306}:3306"
     volumes:
       - lawwiz-dev-mysql:/var/lib/mysql
+      - ./mysql-init/20-knowledge-base.sh:/docker-entrypoint-initdb.d/20-knowledge-base.sh:ro
     healthcheck:
       # ⚠️ 用真实查询而不是 `mysqladmin ping` —— 后者**认证失败也返回成功**，
       #    会造成"看起来就绪、其实连不上"（deploy/README §4.1）。

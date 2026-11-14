@@ -62,9 +62,7 @@ const POLL_TIMEOUT = 90_000
 
 const STAGE_TEXT: Record<Exclude<ReviewStage, null>, string> = {
   text_extract: '正在提取合同文本…',
-  extract_terms: '正在提取关键条款…',
-  retrieve: '正在检索法律依据…',
-  analyze: '正在分析风险点…',
+  analyze: '正在提取条款、检索依据并分析风险…',
   report: '正在生成审查报告…',
 }
 

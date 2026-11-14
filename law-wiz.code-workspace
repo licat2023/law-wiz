@@ -1,0 +1,41 @@
+{
+  // 多根工作区：每个子项目是独立的分析根。
+  // 仓库里有两个同名的顶层包 `app`（backend / knowledge_base/backend），
+  // 单文件夹打开时 Pylance 只能把 `app` 绑到其中一个，另一个的 import 会被误报为
+  // “未知的导入符号”。分根之后各自解析，互不干扰。
+  // 打开方式：`code law-wiz.code-workspace`。
+  "folders": [
+    { "name": "backend", "path": "backend" },
+    { "name": "knowledge-base/backend", "path": "knowledge_base/backend" },
+    { "name": "knowledge-base/frontend", "path": "knowledge_base/frontend" },
+    { "name": "frontend", "path": "frontend" },
+    { "name": "docs", "path": "docs" },
+    { "name": "deploy", "path": "deploy" },
+    { "name": "tools", "path": "tools" }
+  ],
+  "settings": {
+    // 每个根目录各自使用自己的 .venv，而不是全仓库共用一个解释器。
+    "python.analysis.usePerProjectEnvironments": true,
+    // 让 Pylance 采用各根下的 pyrightconfig.json（其中显式钉住 venv 与 extraPaths）。
+    "python.analysis.useNearestConfiguration": true,
+    // 依赖与运行时产物体积大，排除出搜索与文件监听，减少索引噪声。
+    "search.exclude": {
+      "**/.venv": true,
+      "**/.venv-windows": true,
+      "**/__pycache__": true,
+      "**/node_modules": true,
+      "**/.data": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/dist": true
+    },
+    "files.watcherExclude": {
+      "**/.venv/**": true,
+      "**/.venv-windows/**": true,
+      "**/__pycache__/**": true,
+      "**/node_modules/**": true,
+      "**/.data/**": true,
+      "**/dist/**": true
+    }
+  }
+}

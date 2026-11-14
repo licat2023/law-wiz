@@ -1,128 +1,53 @@
 # 部署说明
 
-> 编排文件：`deploy/docker-compose.dev.yml`、`deploy/docker-compose.prod.yml`、
-> `deploy/.env.example` 与 `backend/Dockerfile`（另有 `backend/.dockerignore`）。
-> 本文是它们的**约束说明** —— 改动编排前请先读 §3.4 的内存上限与 §四的两个坑。
+部署包含智法宝业务后端、独立知识库、MySQL 和 Redis。业务前端与知识库管理前端分别构建为静态站点。模型由业务后端调用，嵌入由知识库调用。
 
-本项目部署在**一台 1Panel 主机**上（主机地址与凭据不入库，由团队内部维护）。
-**部署前必须先读容量约束**（见下方 §3.4），否则会踩内存不足的坑。
+## 本地 Demo
 
-## 一、两种用法，别搞混
+从仓库根目录启动数据库和缓存。
 
-| 文件 | 用途 | 起什么 |
-| --- | --- | --- |
-| `docker-compose.dev.yml` | **本地开发** | 只起 MySQL + Redis 两个依赖，后端与前端在宿主机跑（保留热更新） |
-| `docker-compose.prod.yml` | **服务器部署** | 完整栈：MySQL + Redis + 后端 |
-
-后端与前端在本地用 `uv` / `pnpm` 直接跑，**不要用 compose 起应用** —— 容器里的热更新体验远不如宿主机。
-
-## 二、本地开发
-
-```powershell
-# 1) 起依赖
+```bash
 docker compose -f deploy/docker-compose.dev.yml up -d
-
-# 2) 后端
-cd backend
-uv venv --python "C:\Users\<你>\AppData\Local\Python\pythoncore-3.14-64\python.exe"
-uv sync --extra dev
-Copy-Item .env.example .env
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload --port 8000
-
-# 3) 前端（另开一个终端）
-cd frontend
-pnpm install
-pnpm dev        # http://localhost:5173
 ```
 
-> **端口冲突**：dev compose 默认映射宿主机 `3306` / `6379`（与 `.env.example` 一致，克隆即可跑）。
-> 若本机已有原生 MySQL / Redis，用环境变量改映射即可，**不用改文件**：
-> `$env:LAWWIZ_DEV_DB_PORT="3307"; $env:LAWWIZ_DEV_REDIS_PORT="6380"`，
-> 并把 `backend/.env` 的 `LAWWIZ_DB_PORT` / `LAWWIZ_REDIS_URL` 指到对应端口。
+1. 按 [知识库说明](../knowledge_base/README.md) 配置管理员、数据库及嵌入，初始化空库并启动后端和管理界面。
+2. 用管理员创建默认知识库并上传演示语料。将库 ID 写入 `KB_SERVICE_KEYS_JSON` 的 reader 授权，重启知识库使配置生效。
+3. 按 [业务后端说明](../backend/README.md) 配置 `LAWWIZ_KNOWLEDGE_BASE_*` 和模型，初始化业务空库并启动后端。在 `frontend/` 安装依赖并启动前端。
 
-前端 dev server 把 `/api` 代理到 `127.0.0.1:8000`，因此**本地没有跨域问题**。
+知识库可用开发嵌入，业务后端可启用模型替身。语料通过管理后台或知识库 HTTP API 显式入库。开发替身用于演示流程，真实语义召回与模型输出依赖远程服务。
 
-## 三、服务器部署
+## Compose 部署
 
-### 3.1 关键：不要起独立 Nginx
+在 `deploy/` 复制 `.env.example` 并填写各项凭据。`LAWWIZ_MODEL_*` 供业务后端调用模型，`KB_EMBEDDING_*` 供知识库调用真实嵌入。两个数据库使用各自的账号与凭据。业务 reader 与可选 writer 分开授权，writer 入口还要求业务管理员白名单。
 
-服务器 **80/443 已被 1Panel 自带的 OpenResty 占用**（它同时服务着禅道）。
-因此：
-
-- `docker-compose.prod.yml` **不包含任何 Web 服务器容器**；
-- 后端只绑 `127.0.0.1:8000`，由 **1Panel 面板配置站点 + 反向代理**指过来；
-- 前端构建产物（`frontend/dist`）上传到该站点的静态目录。
-
-在 1Panel 面板里：**网站 → 创建网站 → 反向代理**，把 `/api` 指向 `http://127.0.0.1:8000`，
-其余路径指向静态目录。
-
-### 3.2 步骤
+首次部署可先启动知识库，再由管理员创建默认库。首次为知识库建表时可用空的服务凭证映射 `{}`。有实际库 ID 后设置默认库 ID 和 reader 映射，再启用业务后端。Compose 在解析完整配置时会校验必填变量，先填齐 `.env.example` 的必填项；只启动知识库时可临时给默认库 ID 填待初始化值。
 
 ```bash
-# 在服务器上
-mkdir -p /opt/law-wiz && cd /opt/law-wiz
-# 上传 docker-compose.prod.yml 与 .env（在 deploy/ 下由 .env.example 复制并填好凭据）
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml logs -f backend
-
-# 首次部署要建表（在 backend 容器内执行）
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d --wait mysql redis
+docker compose -f docker-compose.prod.yml build knowledge-base backend
+docker compose -f docker-compose.prod.yml run --rm --no-deps knowledge-base python -m app.infrastructure.database
+docker compose -f docker-compose.prod.yml up -d --wait knowledge-base
+# 创建默认库、填写实际 ID 并重启知识库后，再初始化并启动业务后端。
+docker compose -f docker-compose.prod.yml up -d --wait knowledge-base
+docker compose -f docker-compose.prod.yml run --rm --no-deps backend python -m app.infrastructure.database.bootstrap
+docker compose -f docker-compose.prod.yml up -d --wait backend
 ```
 
-> **对象存储（MinIO）不在本期编排里**：一期后端只实现 `local` 存储（`app/infra/storage.py`），
-> 文件落在命名卷 `lawwiz-data`（容器内 `/app/.data`）。`docs/02` 里的 MinIO 是 P2 目标。
+MySQL 首次启动通过 `mysql-init/20-knowledge-base.sh` 创建独立知识库及账号。已有卷跳过镜像初始化脚本。业务文件卷为 `lawwiz-data`，知识库原文件和 Chroma 位于 `lawwiz-kb-data`，数据库位于 `lawwiz-mysql`。
 
-### 3.3 上线前必须确认的三件事
+## 站点与健康检查
 
-| 项 | 为什么 |
+在 `frontend/` 和 `knowledge_base/frontend/` 分别执行 `pnpm install --frozen-lockfile` 与 `pnpm run build`。将两个 `dist/` 发布到各自静态站点，分别把同站点的 `/api` 代理到对应后端。业务站点需将前端页面路由回退至 `index.html`。
+
+业务服务检查 `/api/health`，知识库使用 `/api/ready` 检查数据库和 Chroma。按响应的 `request_id` 查询两个后端日志。
+
+## 内存预算
+
+| 容器 | 当前上限 |
 | --- | --- |
-| **`LAWWIZ_JWT_SECRET` 是独立生成的长随机串** | 留空 compose 会拒绝启动；用开发默认值等于没有鉴权 |
-| **`LAWWIZ_ALLOW_FIXED_VERIFY_CODE=false`** | 固定验证码 `000000` 上线等于任何人可注册任意账号。后端启动校验会拒绝在 production 下启用它，但**别依赖这道防线，配置里就写对** |
-| **`sql_mode` 含 `STRICT_TRANS_TABLES`** | 非严格模式下超长值会被**静默截断**而非拒绝（实测见 `docs/04-数据库设计.md` §2.2）。compose 已显式指定，改配置时别删 |
+| MySQL | 384 MiB |
+| Redis | 96 MiB |
+| 业务后端（含 Agent） | 640 MiB |
+| 知识库（单 worker） | 512 MiB |
 
-### 3.4 内存上限不是可选项
-
-目标服务器只有 **1.7 GiB 内存、可用约 950 MiB**，且上面已跑着禅道（含 MariaDB，常驻 434 MiB）。
-Compose 里每个服务的 `mem_limit` 都是按实测值定的：
-
-| 服务 | 上限 | 依据 |
-| --- | --- | --- |
-| MySQL | 384 MB | `innodb_buffer_pool_size=128M` + 连接开销 |
-| Redis | 96 MB | `maxmemory 64mb` + 进程基座 |
-| 后端 | 384 MB | 单 worker、不装 torch/paddle |
-
-**改大之前先看容量文档**。不设上限的容器会把禅道一起拖垮，而禅道是你们项目管理要用的。
-
-## 四、两个反复踩到的坑（已写进配置，别改回去）
-
-### 4.1 `mysqladmin ping` 不能用来判就绪
-
-它在**认证失败时也返回成功**，会导致容器"看起来就绪但连不上"。
-compose 的 healthcheck 用的是真实查询 `SELECT 1`。
-
-更隐蔽的是：MySQL 容器**初始化期间会短暂接受连接**，此时 `SELECT 1` 也可能通过。
-若写脚本等待就绪，需要**连续多次探测通过**才算数（我们的验证脚本就是这么做的）。
-
-### 4.2 不要用 `latest` 标签
-
-MySQL 必须是 `mysql:9.7`：**8.0 已于 2026-04-30 EOL**，而 **9.0–9.6 是创新版、
-只支持到下一个季度版发布为止、已全部作废**（见 ADR-0008）。
-`latest` 会让你在某次例行更新后被动换到另一个大版本。
-
-同理，Python 基座镜像用 `python:3.14-slim`，且 Dockerfile 里有构建期断言
-校验它不是 free-threaded 变体（见 ADR-0009）。
-
-## 五、日志与排查
-
-```bash
-docker compose -f docker-compose.prod.yml logs -f backend     # 后端日志
-docker compose -f docker-compose.prod.yml ps                   # 各服务状态
-docker stats --no-stream                                       # 实时内存占用
-
-# 健康检查（含运行环境自查：python 版本与是否 free-threaded）
-curl -s http://127.0.0.1:8000/api/v1/health | python -m json.tool
-```
-
-后端日志每行都带 `request_id`，与响应体里的 `request_id` 一致 ——
-用户报障时让他提供这个号，可直接定位到具体请求。
+业务后端的配置上限沿用原业务与 AI 容器上限之和。部署到共享主机前，以真实语料、模型和并发请求核对实际内存占用。

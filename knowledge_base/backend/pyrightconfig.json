@@ -1,0 +1,8 @@
+{
+  // 知识库后端：把 app 钉在本目录，避免被业务后端的同名包抢走。
+  "include": ["app"],
+  "extraPaths": ["."],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard"
+}

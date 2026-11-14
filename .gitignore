@@ -75,9 +75,11 @@ conf/ca.crt
 *.onnx
 
 # --- 编辑器与操作系统 ---
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json.example
+# 各子项目根下也有 .vscode/settings.json（解释器路径、pytest 参数等，随机器而异），
+# 用 `**/.vscode/*` 一并忽略。注意不能写成 `.vscode/`：整个目录被忽略后，下面的例外会失效。
+**/.vscode/*
+!**/.vscode/extensions.json
+!**/.vscode/settings.json.example
 .idea/
 *.swp
 *.swo

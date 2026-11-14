@@ -1,17 +1,3 @@
-# 服务器部署：完整栈 = MySQL + Redis + 后端。
-#
-# ⚠️ 刻意**不含**两样东西：
-#   - MinIO：一期只实现 local 存储（app/infra/storage.py），选 minio 会直接报错；
-#   - Nginx：80/443 已被 1Panel 的 OpenResty 占用，由它在面板里反代到本文件暴露的
-#     127.0.0.1:8000（deploy/README §3.1）。
-#
-# 用法（服务器上，先在 deploy/ 下 `cp .env.example .env` 并填好凭据）：
-#   docker compose -f docker-compose.prod.yml up -d --build
-#   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
-#
-# ⚠️ 每个服务都必须保留 `mem_limit`：部署主机内存极紧（可用约 950 MiB），
-#    不设上限的容器会把同机的其它服务（含禅道）一起拖垮（deploy/README §3.4）。
-
 name: lawwiz
 
 services:
@@ -23,86 +9,124 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
       - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
       - --innodb_buffer_pool_size=128M
-      # ⚠️ 时区固定 +08:00：应用存的是**北京时间**（core/clock.py），而 DDL 里
-      #    `CURRENT_TIMESTAMP(3)`（默认值与 ON UPDATE）取的是**会话时区**。
-      #    服务器时区不是 +08:00 时，同一个库里会混进两种时间口径。
       - --default-time-zone=+08:00
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: ${LAWWIZ_MYSQL_ROOT_PASSWORD:?必须在 deploy/.env 中设置}
+      MYSQL_ROOT_PASSWORD: ${LAWWIZ_MYSQL_ROOT_PASSWORD:?必须设置数据库root密码}
       MYSQL_DATABASE: ${LAWWIZ_DB_NAME:-law_wiz}
       MYSQL_USER: ${LAWWIZ_DB_USER:-lawwiz}
-      MYSQL_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须在 deploy/.env 中设置}
+      MYSQL_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须设置业务数据库密码}
+      KB_MYSQL_DATABASE: ${KB_MYSQL_DATABASE:-law_wiz_kb}
+      KB_MYSQL_USER: ${KB_MYSQL_USER:-lawwiz_kb}
+      KB_MYSQL_PASSWORD: ${KB_MYSQL_PASSWORD:?必须设置独立知识库数据库密码}
     volumes:
       - lawwiz-mysql:/var/lib/mysql
+      - ./mysql-init/20-knowledge-base.sh:/docker-entrypoint-initdb.d/20-knowledge-base.sh:ro
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'mysql -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -e "SELECT 1" >/dev/null 2>&1',
-        ]
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u"$$MYSQL_USER" -e "SELECT 1" >/dev/null 2>&1']
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 40s
     mem_limit: 384m
-    # 不向宿主机发布端口：只有同网络的 backend 能访问
+    networks: [data]
 
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
     command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-    volumes:
-      - lawwiz-redis:/data
+    volumes: [lawwiz-redis:/data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 20
     mem_limit: 96m
-    # 同上：不向宿主机发布端口
+    networks: [data]
 
   backend:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
+    build: {context: ../backend, dockerfile: Dockerfile}
     image: lawwiz-backend:latest
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      # 容器内按服务名寻址；覆盖 .env 里可能残留的 127.0.0.1
+      LAWWIZ_APP_ENV: production
+      LAWWIZ_DEBUG: "false"
+      LAWWIZ_ALLOW_FIXED_VERIFY_CODE: "false"
       LAWWIZ_DB_HOST: mysql
       LAWWIZ_DB_PORT: "3306"
+      LAWWIZ_DB_NAME: ${LAWWIZ_DB_NAME:-law_wiz}
+      LAWWIZ_DB_USER: ${LAWWIZ_DB_USER:-lawwiz}
+      LAWWIZ_DB_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须设置业务数据库密码}
       LAWWIZ_REDIS_URL: redis://redis:6379/0
-      LAWWIZ_APP_ENV: production
-    ports:
-      # 只绑宿主机回环：对外由 1Panel 的 OpenResty 反代。端口可用变量覆盖以便本机验证。
-      - "127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"
-    volumes:
-      # 本地存储（内容寻址文件 + Chroma 持久化）落在命名卷，容器重建不丢数据
-      - lawwiz-data:/app/.data
+      LAWWIZ_JWT_SECRET: ${LAWWIZ_JWT_SECRET:?必须设置业务JWT密钥}
+      LAWWIZ_MODEL_API_KEY: ${LAWWIZ_MODEL_API_KEY:?必须配置真实模型密钥}
+      LAWWIZ_MODEL_BASE_URL: ${LAWWIZ_MODEL_BASE_URL:?必须配置真实模型地址}
+      LAWWIZ_MODEL_NAME: ${LAWWIZ_MODEL_NAME:?必须配置真实模型名称}
+      LAWWIZ_MODEL_TIMEOUT_SECONDS: ${LAWWIZ_MODEL_TIMEOUT_SECONDS:-60}
+      LAWWIZ_STORAGE_BACKEND: local
+      LAWWIZ_STORAGE_LOCAL_ROOT: /app/.data
+      LAWWIZ_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
+      LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY: ${LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY:?必须设置知识库只读凭证}
+      LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY: ${LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY:-}
+      LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID: ${LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID:?必须设置默认知识库ID}
+      LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS: ${LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS:-[]}
+    ports: ["127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"]
+    volumes: [lawwiz-data:/app/.data]
     depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      knowledge-base: {condition: service_healthy}
     healthcheck:
-      # DB 正常时 /health 为 200；DB 不可用会返回 503（见 tests/test_health.py）
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).status == 200 else 1)",
-        ]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
-    mem_limit: 384m
+    mem_limit: 640m
+    networks: [data, knowledge]
+
+  knowledge-base:
+    build: {context: ../knowledge_base/backend, dockerfile: Dockerfile}
+    image: lawwiz-knowledge-base:latest
+    restart: unless-stopped
+    environment:
+      KB_ENVIRONMENT: production
+      KB_DATABASE_URL: ${KB_DATABASE_URL:?必须设置独立异步知识库数据库URL}
+      KB_AUTO_CREATE_SCHEMA: "false"
+      KB_DATA_ROOT: /app/.data
+      KB_ADMIN_USERNAME: ${KB_ADMIN_USERNAME:-admin}
+      KB_ADMIN_PASSWORD_HASH: ${KB_ADMIN_PASSWORD_HASH:?必须设置管理员密码哈希}
+      KB_ADMIN_APPLICATION_ID: ${KB_ADMIN_APPLICATION_ID:-law-wiz}
+      KB_JWT_SECRET: ${KB_JWT_SECRET:?必须设置独立知识库JWT密钥}
+      KB_SERVICE_KEYS_JSON: ${KB_SERVICE_KEYS_JSON:?必须设置知识库服务凭证授权映射}
+      KB_EMBEDDING_MODE: remote
+      KB_EMBEDDING_BASE_URL: ${KB_EMBEDDING_BASE_URL:?必须设置真实嵌入地址}
+      KB_EMBEDDING_API_KEY: ${KB_EMBEDDING_API_KEY:?必须设置真实嵌入密钥}
+      KB_EMBEDDING_MODEL: ${KB_EMBEDDING_MODEL:?必须设置真实嵌入模型}
+      KB_EMBEDDING_DIMENSIONS: ${KB_EMBEDDING_DIMENSIONS:-1536}
+      KB_REQUEST_TIMEOUT_SECONDS: ${KB_REQUEST_TIMEOUT_SECONDS:-60}
+      KB_WORKER_ENABLED: "true"
+      KB_CORS_ORIGINS: ${KB_CORS_ORIGINS:-[]}
+    ports: ["127.0.0.1:${KB_BACKEND_PORT:-8100}:8100"]
+    volumes: [lawwiz-kb-data:/app/.data]
+    depends_on:
+      mysql: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/ready', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    # 内嵌Chroma的候选预算；必须按真实语料和同机应用重新核算。
+    mem_limit: 512m
+    networks: [data, knowledge]
 
 volumes:
   lawwiz-mysql:
   lawwiz-redis:
   lawwiz-data:
+  lawwiz-kb-data:
+
+networks:
+  data:
+  knowledge:

@@ -58,7 +58,7 @@ export const ErrorCode = {
 
   REVIEW_NOT_FOUND: 40401,
   QA_SESSION_NOT_FOUND: 40402,
-  KB_DOC_NOT_FOUND: 40403,
+  KNOWLEDGE_BASE_DOC_NOT_FOUND: 40403,
   FILE_NOT_FOUND: 40404,
 
   PHONE_TAKEN: 40901,
@@ -68,7 +68,7 @@ export const ErrorCode = {
   REVIEW_IN_PROGRESS: 40905,
   REVIEW_NOT_FINISHED: 40906,
   REVIEW_FAILED: 40907,
-  KB_DOC_EXISTS: 40908,
+  KNOWLEDGE_BASE_DOC_EXISTS: 40908,
   SESSION_ARCHIVED: 40909,
 
   FILE_TOO_LARGE: 41301,
@@ -78,9 +78,7 @@ export const ErrorCode = {
 
   INTERNAL_ERROR: 50000,
   LLM_BAD_RESPONSE: 50201,
-  OCR_BAD_RESPONSE: 50202,
   LLM_UNAVAILABLE: 50301,
-  OCR_UNAVAILABLE: 50302,
   VECTOR_UNAVAILABLE: 50303,
 } as const
 
@@ -163,8 +161,7 @@ export interface CreateReviewRequest {
 export type ReviewStatus = 'pending' | 'processing' | 'succeeded' | 'failed'
 
 /** 处理阶段，用于展示进度文案 */
-export type ReviewStage =
-  'text_extract' | 'extract_terms' | 'retrieve' | 'analyze' | 'report' | null
+export type ReviewStage = 'text_extract' | 'analyze' | 'report' | null
 
 export interface ReviewTaskData {
   task_id: string
@@ -243,7 +240,7 @@ export interface ReviewListItem {
 
 export interface QaCitation {
   document_id: string | null
-  kb_chunk_id: string | null
+  knowledge_base_chunk_id: string | null
   law_name: string | null
   article_no: string | null
   quoted_text: string | null

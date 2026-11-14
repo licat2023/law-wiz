@@ -29,12 +29,12 @@
 
 - **前端**：Vue 3 + Vite + Element Plus
 - **后端**：FastAPI（Python）
-- **AI 能力**：DeepSeek API + LangChain + Chroma（RAG）；OCR 仅保留云端扩展接口，当前 MVP 不接入（本地 OCR 因内存约束始终不部署）。
-- **区块链**：FISCO BCOS + Solidity 智能合约 + Web3.py
-- **电子签章**：第三方电子签章服务（开发者版）承担可靠电子签名效力，平台负责编排与存证（见 [ADR-0005](docs/adr/0005-signature-provider-abstraction.md)）
+- **AI 能力**：DeepSeek API + LangChain + Chroma（RAG）；OCR 为后续云端增强能力，当前 MVP 不接入（本地 OCR 因内存约束始终不部署）。
+- **区块链（P2 规划）**：FISCO BCOS + Solidity 智能合约 + Web3.py
+- **电子签章（P3 规划）**：第三方电子签章服务（开发者版）承担可靠电子签名效力，平台负责编排与存证（见 [ADR-0005](docs/adr/0005-signature-provider-abstraction.md)）
 - **密码算法**：RSA-2048 + SHA-256 主链路，国密 SM 系列为后期扩展点（见 [ADR-0003](docs/adr/0003-crypto-rsa-first-sm-later.md)）
-- **数据存储**：MySQL 9.7、MinIO、Redis、Chroma
-- **部署运维**：Debian 13、Docker Compose、OpenResty（1Panel 自带，复用而不另起）、GitHub Actions；Prometheus/Grafana 与 ELK 为**后期可选**
+- **数据存储**：MySQL 9.7、Redis、本地持久化卷、进程内 Chroma；MinIO 为后续规划
+- **部署运维**：Debian 13、Docker Compose、OpenResty（1Panel 自带，复用而不另起）；GitHub Actions 尚未配置，Prometheus/Grafana 与 ELK 为**后期可选**
 
 > **合规边界**：本项目参照 GB/T 38540-2020 的安全目标进行设计，但**不构成对该标准的合规声明** —— 该标准的合规性依赖经商用密码产品认证的密码模块。可靠电子签名能力由具备资质的第三方签章服务提供。
 
@@ -44,7 +44,7 @@
 
 | 分期 | 范围 | 状态 |
 | --- | --- | --- |
-| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | MVP 已实现，已完成本地真实环境端到端验收 |
+| **P1 一期** | **M1 用户管理 + M2 合同智能审查 + M3 法律 AI 问答** | MVP 已实现 |
 | P2 二期 | 部署运维 + M4 区块链证据存证 + M5 个人中心 | 后期 |
 | P3 三期 | M6 电子合同生成与签署 + M7 电子印章与签名管理 | 后期 |
 | P4 四期 | 多方签署、到期提醒、分级授权、停用销毁、安全审计 | 后期 |
@@ -63,90 +63,32 @@
 | [docs/01-需求说明书.md](docs/01-需求说明书.md) | 《智法宝》项目需求说明书：功能需求、非功能需求、运行环境与里程碑 |
 | [docs/02-技术栈.md](docs/02-技术栈.md) | 全生命周期技术栈：各层次已确认的落地选型 |
 | [docs/03-概要设计.md](docs/03-概要设计.md) | 系统分层架构、模块分解与交付边界、数据设计、关键设计、部署拓扑、团队分工 |
-| [docs/04-数据库设计.md](docs/04-数据库设计.md) | 15 张一期表的字段定义、索引与约束、可执行建表 DDL（**已在 MySQL 8.0.46 与 9.7.2 两个版本实测通过**）、备份与安全策略 |
-| [docs/05-接口设计.md](docs/05-接口设计.md) | 一期全部接口的完整契约、统一响应体与错误码、双令牌鉴权、异步任务轮询规则、外部能力接入约定 |
+| [docs/04-数据库设计.md](docs/04-数据库设计.md) | 持久化边界与旧库 DDL 参考；当前建表以各服务 ORM 为准 |
+| [docs/05-接口设计.md](docs/05-接口设计.md) | 一期全部接口的完整契约、统一响应体与错误码、用户令牌鉴权、异步任务轮询规则、外部能力接入约定 |
 | [docs/06-MVP演示指南.md](docs/06-MVP演示指南.md) | P1 答辩演示顺序、架构说明、预期结果与已知边界 |
 | [docs/adr/](docs/adr/) | 架构决策记录：不可逆决策及其被否决的替代方案 |
 
 ## 代码结构
 
-```
+```text
 law-wiz/
-├── backend/          FastAPI 后端（Python 3.14 标准构建）
-│   ├── app/
-│   │   ├── core/     配置、错误码与统一响应体、密码与令牌
-│   │   ├── api/      横切依赖（request_id / 当前用户 / 会话）、中间件、异常处理器
-│   │   ├── infra/    外部世界接入：数据库会话、Redis 刷新令牌存储
-│   │   ├── models/   全部 15 张表的 ORM 模型（集中，保证 Alembic 不漏表）
-│   │   └── slices/   **功能纵切面**，每个含 schemas / service / router
-│   └── tests/
-├── ai-service/       独立 Agent 能力服务（LangGraph + LangChain）
-│   ├── app/agent/    BaseAgent、Runtime、Registry、Legal QA、合同审查 Graph
-│   ├── app/tools/    Backend Internal API Tool / Fake Tool
-│   └── tests/
-├── frontend/         Vue 3 + Element Plus + Vite
-│   └── src/
-│       ├── api/      接口封装与类型定义（与后端契约镜像）
-│       ├── stores/   Pinia 状态
-│       ├── router/   路由与鉴权守卫
-│       ├── views/    页面
-│       └── styles/   全局样式
-├── deploy/           部署编排与说明
-├── docs/             设计文档集 + ADR + 插图源码
-└── tools/            一次性脚本与渲染工具
+├── backend/          # 业务 FastAPI，包含合同审查和法律问答 Agent
+├── frontend/         # 智法宝用户端
+├── knowledge_base/
+│   ├── backend/      # 文档入库、索引、检索及独立 FastAPI
+│   └── frontend/     # 知识库管理后台
+├── deploy/           # Compose 与数据库账号初始化
+├── docs/             # 设计、接口、架构决策和施工记录
+└── tools/            # 文档和架构图工具
 ```
 
-## 当前 MVP 架构与调用链
+业务后端按用户、文件、合同、合同审查和法律问答组织。合同版本保存解析后的正文，审查任务和报告独立保存。两个 Agent 在业务后端进程中执行，通过 HTTP 检索独立知识库。知识库管理文档来源、修订、切分、嵌入和 Chroma 索引。
 
-```
-Frontend → Backend → AI-Service → AgentRuntime → AgentRegistry
-         → LegalQaAgent / ContractReviewAgent → LangGraph Workflow
-         → LangChain LLM / Tool → Backend Internal API → 数据持久化
-```
+## 本地运行
 
-- Backend 负责鉴权、文件、会话、任务、事务、风险点/引用/报告持久化；AI-Service 不直接访问业务数据库。
-- AI-Service 注册 `legal_qa`、`contract_review` 与保留的 `demo` Agent；通用入口为 `POST /api/v1/agent/invoke`。
-- Legal QA：`prepare_query → retrieve_law → generate_answer → validate_citations → finalize`。
-- 合同审查：`prepare_contract → extract_terms → retrieve_laws → retrieve_risk_rules → analyze_risks → validate_sources → finalize`。
-- 服务间数据经 `X-Internal-Service-Token` 认证的 Backend Internal API 获取；真实业务输入（例如问题、`plain_text`、任务标识）由 Backend 直接传入。
+按 [部署说明](deploy/README.md) 启动 MySQL、Redis 和两个后端。使用 [知识库管理后台](knowledge_base/README.md) 创建库并上传 Demo 语料，再设置业务后端的默认知识库与只读凭证。模型和嵌入可分别启用开发替身。
 
-## 当前 MVP 能力与限制
-
-- Legal QA：法规检索、可溯源引用、结构化答案持久化。
-- 合同审查：可提取文本的 PDF / DOCX / UTF-8 TXT → 风险点与 PDF 报告。
-- RAG：核心法规种子和风险规则可通过 `backend/tools/import_core_legal_corpus.py` 幂等导入；Chroma 支持持久化索引。当前嵌入仍是确定性开发实现，生产级语义 Embedding Provider 属后续工作。
-- LLM：AI-Service 经 LangChain 调用 DeepSeek；密钥只读系统环境变量，自动化测试使用 Fake/Stub。
-- OCR：仅保留 `infra/ocr.py` 扩展点；扫描件与图片合同当前返回明确失败提示，不进入 Agent。
-- 已完成：本地 MySQL / Redis / Chroma、Frontend / Backend / AI-Service、真实 DeepSeek 的两条端到端链路验收。
-- 后续：部署环境验收、OCR、生产级语义 Embedding Provider，以及 M4–M7。
-
-## 本地启动与验证
-
-1. Backend：进入 `backend/`，使用 Python 3.14 标准构建执行 `uv sync --extra dev --extra vector`；起 MySQL/Redis 后执行 `uv run alembic upgrade head`，再运行 `uv run uvicorn app.main:app --reload --port 8000`。
-2. AI-Service：进入 `ai-service/`，执行 `uv sync --extra dev`，以环境变量提供 `AI_SERVICE_BACKEND_BASE_URL`、`AI_SERVICE_BACKEND_TOKEN`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，再运行 `uv run uvicorn app.main:app --reload --port 8001`。
-3. Frontend：进入 `frontend/`，执行 `pnpm install --frozen-lockfile` 与 `pnpm dev`。
-
-所有变量的名称见 `backend/.env.example` 与 `ai-service/.env.example`；示例文件不包含凭据，`.env` 不得提交。
-
-常用验证命令：
-
-```powershell
-# backend/
-uv run --extra dev --extra vector ruff check .
-uv run --extra dev --extra vector pytest
-
-# ai-service/
-uv run --extra dev ruff check .
-uv run --extra dev pytest
-
-# frontend/
-pnpm run lint
-pnpm run build
-```
-
-**为什么按纵切面分目录而不是 `models/ services/ api/`**：本项目的分工是「一人负责一条
-端到端链路」（ADR-0001）。技术分层会让每个功能改动横跨三个目录，PR 冲突面大。
-详见 [`backend/app/slices/README.md`](backend/app/slices/README.md)。
+业务后端启动和检查命令见 [后端说明](backend/README.md)，演示链路见 [Demo 指南](docs/06-MVP演示指南.md)。[文件清单](docs/FILE_MAP.md) 记录本次目录重构与验收。
 
 ## 协作约定
 
