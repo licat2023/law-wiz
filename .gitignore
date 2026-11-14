@@ -101,5 +101,11 @@ temp/
 # --- 文档导出产物（源文件是 Markdown，导出物不入库）---
 docs/export/
 
+# --- 本地工具与课程报告工作目录 ---
+/.archify/
+/.codegraph/
+/.research/
+/report_work/
+
 # --- 会话记录（个人笔记，不入库）---
 .notes/
