@@ -17,6 +17,7 @@
  * 环境变量：
  *   MERMAID_DIR  含 node_modules/mermaid 的目录（默认取当前工作目录）
  *   CHROME_PATH  浏览器可执行文件路径（默认自动探测 Chrome / Edge）
+ *   MMD_NODE_SPACING / MMD_RANK_SPACING  流程图的节点间距和层级间距（默认 45 / 70）
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -70,6 +71,7 @@ if (!mermaidUmd) {
 const source = readFileSync(input, 'utf8').trim();
 const mermaidCode = readFileSync(mermaidUmd, 'utf8');
 
+// HTML 标签依赖 Mermaid 的 loose 模式。输入限于可信的本地图源。
 const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>PENDING</title>
 <style>

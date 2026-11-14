@@ -1,9 +1,7 @@
 /**
  * 与后端接口契约对应的类型定义。
  *
- * ⚠️ **这些类型必须与后端各切片的 `schemas.py` 保持一致** ——
- * 后端 Pydantic 模型是契约的唯一真源（见 03-概要设计 §5.5），
- * 本文件是它在 TypeScript 侧的镜像。改后端字段名时**必须同步改这里**。
+ * 这些类型镜像业务后端 `app/domains/` 中的 Pydantic 模型与 OpenAPI 契约。
  *
  * 两条全局约定（见 05-接口设计 §3）：
  * 1. **ID 一律是 string**，不是 number —— 后端主键是 BIGINT UNSIGNED，
@@ -252,8 +250,7 @@ export interface QaMessage {
   role: 'user' | 'assistant'
   content: string
   /**
-   * ⚠️ 为 false 时前端**必须**提示"未找到直接法律依据" ——
-   * 这是"回答溯源"的反面：溯源不了的时候要说出来（05-接口设计 §5.6）
+   * 对已经返回正文的助手消息，false 表示未找到直接法律依据（05-接口设计 §5.6）。
    */
   has_citation: boolean
   citations?: QaCitation[]

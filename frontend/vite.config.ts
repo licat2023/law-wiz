@@ -1,3 +1,4 @@
+/** 构建业务界面并为本地开发配置同源 API 代理。 */
 import { fileURLToPath, URL } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
@@ -20,7 +21,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // 开发环境代理到后端，避免 CORS —— 生产由 OpenResty 同源代理，两者行为一致
+    // 开发与生产都通过当前站点的 /api 访问业务后端。
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

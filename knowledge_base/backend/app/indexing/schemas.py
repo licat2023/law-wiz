@@ -6,6 +6,7 @@ from app.api.responses import Payload
 
 
 class IndexRequest(Payload):
+    # 未提供的切分选项沿用库默认配置，合并后统一校验。
     revision: int = Field(ge=1)
     chunking_strategy: str | None = None
     chunk_size: int | None = None

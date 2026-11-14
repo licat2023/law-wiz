@@ -11,6 +11,7 @@ from app.errors import AppError
 
 
 async def session(request: Request):
+    """在请求处理成功后提交会话，将数据库约束冲突转为业务错误。"""
     async with request.app.state.sessions() as db:
         try:
             yield db
@@ -21,6 +22,7 @@ async def session(request: Request):
 
 
 async def identity(request: Request, credentials=Depends(bearer)):
+    """将 Bearer 凭证解析为管理员或受限的服务身份。"""
     return await authenticate(request, credentials)
 
 

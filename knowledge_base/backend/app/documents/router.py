@@ -37,6 +37,7 @@ async def documents(
     law_name: str | None = None,
     sort: str = "-created_at",
 ):
+    # query 非空时优先，否则使用 q 作为标题搜索词。
     kb = await load_kb(db, user, kb_id)
     return ok(
         request,
@@ -47,6 +48,7 @@ async def documents(
 
 
 async def file_from_form(request):
+    """读取单个受限大小的上传文件，去除路径并归一化扩展名。"""
     form = await request.form(max_files=1, max_fields=5, max_part_size=65536)
     file = form.get("file")
     if file is None or not hasattr(file, "read"):
@@ -63,6 +65,7 @@ async def file_from_form(request):
 
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=Envelope[dict], status_code=201)
 async def upload_document(kb_id: str, request: Request, db: Db, user: User, idempotency_key: Key = None):
+    # JSON 直接提交 Markdown，multipart 上传原文件，幂等键可重放上传结果。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
     if request.headers.get("content-type", "").split(";", 1)[0] == "application/json":
@@ -97,6 +100,7 @@ async def upload_document(kb_id: str, request: Request, db: Db, user: User, idem
 
 @router.get("/knowledge-bases/{kb_id}/documents/{document_id}", response_model=Envelope[dict])
 async def get_document(kb_id: str, document_id: str, request: Request, db: Db, user: User):
+    # 详情包含当前修订正文以及最近的处理任务和索引记录。
     kb = await load_kb(db, user, kb_id)
     doc = await service.load_document(db, kb, document_id)
     return ok(request, await service.document_view(db, doc, detail=True))
@@ -106,6 +110,7 @@ async def get_document(kb_id: str, document_id: str, request: Request, db: Db, u
 async def update_document(
     kb_id: str, document_id: str, payload: DocumentPatch, request: Request, db: Db, user: User
 ):
+    # 提交当前修订号进行并发检查，正文编辑仅支持 Markdown。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
     doc = await service.load_document(db, kb, document_id)
@@ -128,6 +133,7 @@ async def update_document(
 async def replace_file(
     kb_id: str, document_id: str, request: Request, db: Db, user: User, idempotency_key: Key = None
 ):
+    # 替换原文件须带当前修订号，匹配的幂等键可重放结果。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
     form, body, filename, fmt = await file_from_form(request)
@@ -163,6 +169,7 @@ async def download_file(
     user: User,
     revision: int | None = Query(None, ge=1),
 ):
+    # 允许下载指定历史修订的原文件，默认读取当前修订。
     kb = await load_kb(db, user, kb_id)
     doc = await service.load_document(db, kb, document_id)
     stored = await service.revision_of(db, doc.id, revision or doc.revision)
@@ -181,6 +188,7 @@ async def download_file(
 
 @router.delete("/knowledge-bases/{kb_id}/documents/{document_id}", response_model=Envelope[dict])
 async def remove_document(kb_id: str, document_id: str, request: Request, db: Db, user: User):
+    # 立即隐藏文档并取消未完成任务，有可关联的索引时登记清理任务。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
     return ok(request, await service.delete_document(db, await service.load_document(db, kb, document_id)))
@@ -188,6 +196,7 @@ async def remove_document(kb_id: str, document_id: str, request: Request, db: Db
 
 @router.post("/knowledge-bases/{kb_id}/imports", response_model=Envelope[dict])
 async def imports(kb_id: str, payload: ImportRequest, request: Request, db: Db, user: User):
+    # 接收迁移语料和历史块，返回旧块到新块的引用映射。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
     return ok(request, await import_document(db, request.app.state, kb, payload))

@@ -1,3 +1,5 @@
+"""读取 KB_ 环境配置，并在启动时校验知识库的运行依赖。"""
+
 from pathlib import Path
 from typing import Literal
 
@@ -6,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """通过环境变量或 .env 读取配置，密码哈希、密钥与数据库地址在 repr 中省略。"""
+
     model_config = SettingsConfigDict(env_prefix="KB_", env_file=".env", extra="ignore")
 
     environment: Literal["development", "testing", "production"] = "development"
@@ -36,6 +40,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = []
 
     def check_runtime(self):
+        """检查数据库、凭证及嵌入配置，并拦截生产环境禁用的模式。"""
         if not self.database_url:
             raise ValueError("需要配置 KB_DATABASE_URL")
         if not self.database_url.startswith(("mysql+aiomysql://", "sqlite+aiosqlite://")):

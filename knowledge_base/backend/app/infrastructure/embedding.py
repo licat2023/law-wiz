@@ -9,6 +9,7 @@ from app.errors import AppError
 
 
 def _normalize(vector: list[float], dimensions: int) -> list[float]:
+    """校验维度及有限数值，先按最大绝对值缩放以避免求模时溢出。"""
     if (
         not isinstance(vector, list)
         or len(vector) != dimensions
@@ -24,6 +25,8 @@ def _normalize(vector: list[float], dimensions: int) -> list[float]:
 
 
 class RemoteEmbedding:
+    """批量调用远程嵌入接口，指纹按地址、模型、维度和归一化方式生成。"""
+
     def __init__(self, client: httpx.AsyncClient, base_url: str, key: str, model: str, dimensions: int):
         self.client = client
         self.base_url = base_url.rstrip("/")
@@ -35,6 +38,7 @@ class RemoteEmbedding:
         ).hexdigest()[:24]
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        """返回与输入顺序一致的单位向量。远程请求失败或响应格式无效时抛出业务错误。"""
         if not texts:
             return []
         result = []
@@ -72,6 +76,7 @@ class DevelopmentEmbedding:
     fingerprint = "development-hash-16-v1"
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        """为每段正文生成可复现的 16 维单位向量，用于验证索引和查询流程。"""
         return [
             _normalize([b / 127.5 - 1 for b in hashlib.sha256(text.encode()).digest()[:16]], 16)
             for text in texts

@@ -65,8 +65,7 @@ ca/
 conf/ca.crt
 
 # --- 模型权重（体积大，不入库）---
-# ⚠️ 必须锚定根目录：写成不带斜杠的 `models/` 会连带忽略 backend/app/models/
-#    （ORM 模型），使克隆下来的仓库缺少整个数据层。锚定后仅忽略根目录的权重目录。
+# 仅忽略根目录的权重目录。`models/` 会匹配任意层级的同名目录，可能遗漏应用源码。
 /models/
 !backend/app/models/
 *.bin

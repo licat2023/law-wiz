@@ -1,3 +1,4 @@
+# 部署两个后端及其数据依赖。两个站点的静态文件由各自站点服务发布。
 name: lawwiz
 
 services:
@@ -21,6 +22,7 @@ services:
       KB_MYSQL_PASSWORD: ${KB_MYSQL_PASSWORD:?必须设置独立知识库数据库密码}
     volumes:
       - lawwiz-mysql:/var/lib/mysql
+      # 官方镜像只在首次初始化空卷时执行该脚本，业务库与知识库分别授权。
       - ./mysql-init/20-knowledge-base.sh:/docker-entrypoint-initdb.d/20-knowledge-base.sh:ro
     healthcheck:
       test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u"$$MYSQL_USER" -e "SELECT 1" >/dev/null 2>&1']
@@ -70,6 +72,7 @@ services:
       LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY: ${LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY:-}
       LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID: ${LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID:?必须设置默认知识库ID}
       LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS: ${LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS:-[]}
+    # 宿主机反向代理通过回环地址转发业务 API。
     ports: ["127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"]
     volumes: [lawwiz-data:/app/.data]
     depends_on:
@@ -92,6 +95,7 @@ services:
     environment:
       KB_ENVIRONMENT: production
       KB_DATABASE_URL: ${KB_DATABASE_URL:?必须设置独立异步知识库数据库URL}
+      # 首次部署须显式初始化关系表，具体命令见部署说明。
       KB_AUTO_CREATE_SCHEMA: "false"
       KB_DATA_ROOT: /app/.data
       KB_ADMIN_USERNAME: ${KB_ADMIN_USERNAME:-admin}
@@ -112,6 +116,7 @@ services:
     depends_on:
       mysql: {condition: service_healthy}
     healthcheck:
+      # 就绪探测读取数据库并检查 Chroma，业务后端会等待此探测通过。
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/ready', timeout=5)"]
       interval: 15s
       timeout: 10s

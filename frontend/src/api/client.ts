@@ -77,6 +77,7 @@ const REFRESH_TOKEN_KEY = 'lawwiz.refresh_token'
 const accessToken = ref<string | null>(sessionStorage.getItem(ACCESS_TOKEN_KEY))
 const refreshToken = ref<string | null>(sessionStorage.getItem(REFRESH_TOKEN_KEY))
 
+/** 同步维护响应式令牌与当前标签页的会话存储。 */
 export const tokenStore = {
   get access(): string | null {
     return accessToken.value
@@ -98,8 +99,8 @@ export const tokenStore = {
   },
 }
 
-/** 登出时由 auth store 注入，避免此处 import store 造成循环依赖 */
 let onUnauthorized: (() => void) | null = null
+/** 注册令牌刷新失败后的回调，由认证 store 清理用户状态。 */
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
@@ -108,6 +109,7 @@ export function setUnauthorizedHandler(fn: () => void) {
 // 实例与拦截器
 // ============================================================
 
+/** 带认证拦截器的原始客户端，供上传进度、二进制响应等自定义请求使用。 */
 export const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: 30_000,
@@ -227,6 +229,7 @@ export async function request<T>(config: AxiosRequestConfig): Promise<T> {
   return body.data as T
 }
 
+/** JSON 接口的快捷方法，统一返回业务数据或抛出 ApiError。 */
 export const api = {
   get: <T>(url: string, params?: Record<string, unknown>) =>
     request<T>({ method: 'GET', url, params }),

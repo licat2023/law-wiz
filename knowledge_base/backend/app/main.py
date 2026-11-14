@@ -25,11 +25,14 @@ logger = logging.getLogger("knowledge_base.api")
 
 
 class BodyTooLarge(HTTPException):
+    """读取分段请求时超过累计字节限额，由应用转换为统一响应。"""
+
     def __init__(self):
         super().__init__(413, "请求超过大小上限")
 
 
 def body_limit_response(state):
+    """让请求体过大响应也携带同一个请求追踪号。"""
     return JSONResponse(
         {"code": 40001, "message": "请求超过大小上限", "data": None, "request_id": state["request_id"]},
         status_code=413,
@@ -37,6 +40,8 @@ def body_limit_response(state):
 
 
 class BodyLimit:
+    """按写入路由及正文类型限制请求字节数，同时检查声明长度和实际读取长度。"""
+
     def __init__(self, app, settings):
         self.app, self.settings = app, settings
 
@@ -75,6 +80,7 @@ class BodyLimit:
 
 
 def create_app(settings: Settings | None = None):
+    """注册知识库中间件、异常映射和路由，允许调用方显式传入配置。"""
     settings = settings or Settings()
 
     app = FastAPI(title="独立知识库", version="0.1.0", lifespan=lifespan)
@@ -135,10 +141,12 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/health")
     async def health(request: Request):
+        # 存活探针仅验证 HTTP 进程能够响应。
         return {"code": 0, "data": {"status": "ok"}, "request_id": request.state.request_id}
 
     @app.get("/api/ready")
     async def ready(request: Request):
+        # 就绪探针实际检查数据库和 Chroma，嵌入模式仅作为响应信息。
         async with app.state.sessions() as db:
             await db.execute(text("SELECT 1"))
         await asyncio.to_thread(app.state.vector.heartbeat)

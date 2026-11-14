@@ -11,4 +11,5 @@ router = APIRouter(prefix="/api")
 
 @router.post("/auth/login", response_model=Envelope[dict])
 async def sign_in(payload: Login, request: Request):
+    # 配置中的唯一管理员可凭账号密码换取限时 Bearer 令牌。
     return ok(request, await login(request.app.state.settings, payload.username, payload.password))

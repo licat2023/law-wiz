@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 知识库管理界面的全局导航与登录状态切换。 */
 import { watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Collection, Document, Search, SwitchButton } from '@element-plus/icons-vue'
@@ -10,6 +11,7 @@ watch(authenticated, (value) => {
 function logout() {
   setToken('')
 }
+// Hash 路由已经占用 URL 的片段标识，跳转链接直接把焦点移到主内容。
 function focusMain() {
   document.getElementById('main')?.focus()
 }

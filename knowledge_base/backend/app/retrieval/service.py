@@ -1,3 +1,5 @@
+"""在生效索引中召回叶块，并用索引对应的文档修订组织引用与法条上下文。"""
+
 import asyncio
 
 from sqlalchemy import select
@@ -10,6 +12,7 @@ from app.infrastructure.database import now
 
 
 async def search(db, state, kb, payload):
+    """应用修订元数据和嵌入空间约束，返回仍生效的引用及受限的上下文。"""
     if not payload.query.strip():
         raise invalid("检索问题不能为空")
     pairs = (
@@ -28,6 +31,7 @@ async def search(db, state, kb, payload):
     ).all()
     eligible = {}
     for doc, index in pairs:
+        # 用索引对应的修订过滤。文档编辑后的元数据要等新索引发布才用于检索。
         revision = await revision_of(db, doc.id, index.revision)
         metadata = revision.source_metadata
         today = now().date().isoformat()
@@ -75,7 +79,7 @@ async def search(db, state, kb, payload):
             )
         ).all()
     }
-    # 查询完成后再读一次发布指针，覆盖并发删除/切换；不以旧会话缓存判断有效性。
+    # 结束本轮读取事务再检查生效指针，过滤查询期间已删除或切换索引的文档。
     await db.commit()
     live = dict(
         (
@@ -91,6 +95,7 @@ async def search(db, state, kb, payload):
     )
     items, seen_parents, budget = [], set(), state.settings.parent_context_chars
     article_contents = {}
+    # 完整法条与普通父块分别计量，法条正文按父块 ID 去重。
     article_budget = min(state.settings.max_text_chars, 16000)
     article_limit_reached = False
     for chunk_id, score in hits:

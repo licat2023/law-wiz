@@ -9,6 +9,8 @@ from app.infrastructure.database import BODY, Base, Identity
 
 
 class Document(Base, Identity):
+    """保存当前文档状态。生效索引与等待发布的目标索引分别记录。"""
+
     __tablename__ = "kb_document"
     knowledge_base_id: Mapped[str] = mapped_column(ForeignKey("kb_knowledge_base.id"), index=True)
     title: Mapped[str] = mapped_column(String(300))
@@ -25,6 +27,8 @@ class Document(Base, Identity):
 
 
 class DocumentRevision(Base, Identity):
+    """保存单次修订的原文件引用、正文及块定位信息。"""
+
     __tablename__ = "kb_document_revision"
     __table_args__ = (UniqueConstraint("document_id", "number"),)
     document_id: Mapped[str] = mapped_column(ForeignKey("kb_document.id"), index=True)
@@ -41,6 +45,8 @@ class DocumentRevision(Base, Identity):
 
 
 class ImportRecord(Base, Identity):
+    """按库和来源标识关联导入目标，保留最近一次导入结果供重放。"""
+
     __tablename__ = "kb_import"
     __table_args__ = (UniqueConstraint("knowledge_base_id", "source_namespace", "source_document_id"),)
     knowledge_base_id: Mapped[str] = mapped_column(ForeignKey("kb_knowledge_base.id"))

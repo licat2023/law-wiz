@@ -1,3 +1,4 @@
+/** 创建业务界面并安装认证状态、页面路由和全局样式。 */
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 

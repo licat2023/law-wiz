@@ -39,6 +39,7 @@
 </template>
 
 <script setup lang="ts">
+/** 提交合同审查，按上传和任务处理两个阶段显示进度。 */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -77,8 +78,8 @@ const taskProgress = ref(0)
 const stageText = ref('')
 
 /**
- * 幂等键：同一次用户操作（含重试）必须复用同一个键（契约第 2 条）。
- * 创建失败时保留，重试不发新键；成功后清空。
+ * 当前文件对应的提交键。请求失败、任务失败或轮询超时后再次提交仍沿用此键。
+ * 更换文件或任务成功后清空。
  */
 const idemKey = ref<string | null>(null)
 
@@ -159,7 +160,7 @@ async function startReview() {
     return
   }
 
-  // 同一次用户操作复用同一个幂等键：创建失败重试时不重复扣费、不产生两个任务
+  // 保留同一提交的身份，服务端已接受的请求可以用原键取回任务。
   idemKey.value ??= newIdempotencyKey()
 
   loading.value = true

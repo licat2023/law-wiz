@@ -1,3 +1,4 @@
+/** 启动知识库管理界面，注册路由和中文组件库。 */
 import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -12,6 +13,7 @@ import { authenticated } from './api'
 import './style.css'
 
 const router = createRouter({
+  // 使用 hash 路由，静态站点只需提供应用入口。
   history: createWebHashHistory(),
   routes: [
     { path: '/login', component: LoginView },

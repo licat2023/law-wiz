@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 用受限 Markdown 渲染器显示文档正文及检索结果。 */
 import { computed } from 'vue'
 import { renderMarkdown } from '../markdown'
 const props = defineProps<{ content: string }>()

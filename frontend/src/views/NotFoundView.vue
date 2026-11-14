@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 未匹配业务路由时展示，返回入口沿用首页重定向。 */
 import { useRouter } from 'vue-router'
 
 const router = useRouter()

@@ -9,6 +9,8 @@ from app.infrastructure.database import BODY, Base, Identity
 
 
 class IndexRevision(Base, Identity):
+    """记录某次索引对应的文档修订、切分配置及发布时使用的向量空间。"""
+
     __tablename__ = "kb_index_revision"
     document_id: Mapped[str] = mapped_column(ForeignKey("kb_document.id"), index=True)
     revision: Mapped[int] = mapped_column(Integer)
@@ -19,6 +21,8 @@ class IndexRevision(Base, Identity):
 
 
 class Chunk(Base, Identity):
+    """保存用于召回或上下文补全的文本块。仅叶块写入向量库。"""
+
     __tablename__ = "kb_chunk"
     __table_args__ = (Index("ix_kb_chunk_version_order", "index_id", "chunk_no"),)
     index_id: Mapped[str] = mapped_column(ForeignKey("kb_index_revision.id"))
@@ -35,6 +39,8 @@ class Chunk(Base, Identity):
 
 
 class ProcessingJob(Base, Identity):
+    """记录索引或清理工作的执行阶段、认领次数和可过期的租约。"""
+
     __tablename__ = "kb_processing_job"
     __table_args__ = (Index("ix_kb_job_claim", "status", "lease_until"),)
     document_id: Mapped[str] = mapped_column(ForeignKey("kb_document.id"), index=True)

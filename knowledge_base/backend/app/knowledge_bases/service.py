@@ -14,6 +14,7 @@ from app.knowledge_bases.models import KnowledgeBase
 
 
 async def load_kb(db: AsyncSession, principal: Principal, kb_id: str):
+    """读取可访问的活动库。缺失、删除和越权统一返回 40401。"""
     kb = await db.get(KnowledgeBase, kb_id)
     if kb is None or kb.deleted_at is not None or not principal.can_read(kb):
         raise AppError(40401, "知识库不存在或无权访问", 404)
@@ -21,6 +22,7 @@ async def load_kb(db: AsyncSession, principal: Principal, kb_id: str):
 
 
 async def kb_view(db, kb):
+    """返回库概要和当前未删除的文档数量。"""
     count = await db.scalar(
         select(func.count())
         .select_from(Document)
@@ -39,6 +41,7 @@ async def kb_view(db, kb):
 
 
 async def list_kbs(db, principal, page_number, page_size):
+    """分页列出可见知识库，服务凭证同时受应用归属和库授权列表限制。"""
     conditions = [KnowledgeBase.deleted_at.is_(None)]
     if principal.role != "admin":
         conditions += [
@@ -59,6 +62,7 @@ async def list_kbs(db, principal, page_number, page_size):
 
 
 async def create_kb(db, principal, payload):
+    """由管理员创建库，未指定应用时使用其默认应用。"""
     if principal.role != "admin":
         raise AppError(40301, "创建知识库需要管理员身份", 403)
     kb = KnowledgeBase(
@@ -73,6 +77,7 @@ async def create_kb(db, principal, payload):
 
 
 async def patch_kb(db, kb, payload):
+    """合并并校验库的默认设置，已安排的索引任务保留原有选项。"""
     values = payload.model_dump(exclude_unset=True, exclude_none=True)
     options = ChunkOptions.model_validate(
         kb.options | {k: v for k, v in values.items() if k in ChunkOptions.model_fields}

@@ -13,5 +13,6 @@ router = APIRouter(prefix="/api")
 
 @router.post("/knowledge-bases/{kb_id}/search", response_model=Envelope[dict])
 async def retrieve(kb_id: str, payload: SearchRequest, request: Request, db: Db, user: User):
+    # 在已授权的知识库内召回叶块，并返回正文定位与可用的父块上下文。
     kb = await load_kb(db, user, kb_id)
     return ok(request, await search(db, request.app.state, kb, payload))

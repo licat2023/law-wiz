@@ -11,6 +11,7 @@ from app.infrastructure.idempotency import digest
 
 
 async def import_document(db, state, kb, payload):
+    """按来源标识重放或修订文档，并返回历史块 ID 到新块 ID 的映射。"""
     hashed = digest(payload.model_dump())
     record = await db.scalar(
         select(ImportRecord).where(
@@ -70,6 +71,7 @@ async def import_document(db, state, kb, payload):
             result={},
         )
         db.add(record)
+    # 历史索引只供旧引用映射。正常检索由文档的生效索引指针决定。
     history = IndexRevision(
         document_id=doc.id,
         revision=doc.revision,

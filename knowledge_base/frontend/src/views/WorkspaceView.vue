@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 管理单个知识库的文档导入、索引任务和检索验证。 */
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -49,6 +50,7 @@ const query = ref(''),
   searched = ref(false),
   searching = ref(false),
   searchError = ref('')
+// 轮询沿用上次提交的条件，表单输入只有在应用筛选后才生效。
 const applied = ref({ query: '', status: '', format: '' })
 const busyDocument = ref('')
 let loadSequence = 0
@@ -57,6 +59,7 @@ async function loadDocs(signal?: AbortSignal) {
   const params = new URLSearchParams({ page: String(page.value), page_size: '20' })
   for (const [key, value] of Object.entries(applied.value)) if (value) params.set(key, value)
   const data = await get<Page<DocumentRecord>>(`${path}/documents?${params}`, signal)
+  // 分页、筛选和后台刷新可能并发，只采纳最后一次发起的请求。
   if (sequence !== loadSequence) return
   docs.value = data.items
   total.value = data.total
@@ -198,6 +201,7 @@ async function search() {
     searching.value = false
   }
 }
+/** 跳转到命中正文，携带原始修订、索引、分块和字符区间。 */
 function locate(item: SearchResult) {
   void router.push({
     path: `/bases/${kb}/documents/${item.document_id}`,

@@ -9,6 +9,8 @@ from app.infrastructure.database import Base, Identity
 
 
 class KnowledgeBase(Base, Identity):
+    """记录所属应用及新建索引任务使用的默认切分设置。"""
+
     __tablename__ = "kb_knowledge_base"
     application_id: Mapped[str] = mapped_column(String(128), index=True)
     name: Mapped[str] = mapped_column(String(200))

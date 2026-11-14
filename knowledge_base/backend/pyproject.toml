@@ -1,3 +1,4 @@
+# 独立知识库的运行依赖、包构建与 Ruff 检查配置。
 [project]
 name = "law-wiz-knowledge-base"
 version = "0.1.0"
@@ -12,6 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# SQLite 异步驱动用于本地验证，生产使用 MySQL 异步驱动。
 dev = ["aiosqlite>=0.20", "ruff>=0.8"]
 
 [build-system]

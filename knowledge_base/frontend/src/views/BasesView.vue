@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 分页管理知识库及各库默认的分块与索引设置。 */
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Collection, ArrowRight } from '@element-plus/icons-vue'

@@ -1,8 +1,8 @@
 /**
  * 合同智能审查接口（M2 的 C 组）与文件上传（B 组）。
  *
- * 函数签名按 05-接口设计 §5.3/§5.4 冻结，并与 Backend 的 files / review
- * 两个切片保持一致；页面只依赖该稳定 API，不感知 AI-Service 的内部工作流。
+ * 文件上传和审查任务分别由后端的 files 和 contract_review 领域提供，
+ * 契约见 05-接口设计 §5.3/§5.4。
  */
 
 import { api, http } from './client'
@@ -15,7 +15,7 @@ import type {
   ReviewTaskData,
 } from './types'
 
-/** B-01 上传文件（multipart/form-data） */
+/** B-01 上传文件，浏览器提供传输总量时以整数百分比报告进度。 */
 export async function uploadFile(
   file: File,
   onProgress?: (percent: number) => void,
@@ -37,11 +37,7 @@ export async function uploadFile(
 /**
  * C-01 发起合同审查（异步）。
  *
- * ⚠️ **必须携带 `Idempotency-Key`**（05-接口设计 §3.5）：审查会消耗 LLM 额度，
- * 网络超时重试时若不带同一个 key，会重复扣费并产生两个任务。
- *
- * **刻意不提供"不带幂等键"的版本** —— 契约要求必须带键，那么暴露一个不带的
- * 入口就等于给调用方留了一个必然踩的坑。
+ * 同次提交遇到网络超时时应复用 `Idempotency-Key`，以便取回服务端已记录的任务。
  */
 export async function createReview(
   payload: CreateReviewRequest,
@@ -68,7 +64,7 @@ export function getReviewResult(taskId: string) {
   return api.get<ReviewResultData>(`/reviews/${taskId}/result`)
 }
 
-/** C-04 下载审查报告；返回可直接用于 <a download> 的地址 */
+/** C-04 生成报告端点地址，请求需携带当前用户的访问令牌。 */
 export function reviewReportUrl(taskId: string, format: 'pdf' = 'pdf') {
   const base = import.meta.env.VITE_API_BASE ?? '/api'
   return `${base}/reviews/${taskId}/report?format=${format}`

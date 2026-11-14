@@ -1,3 +1,4 @@
+// 为管理界面的 JavaScript、TypeScript 和 Vue 单文件组件配置检查规则。
 import js from '@eslint/js'
 import prettier from 'eslint-config-prettier'
 import vue from 'eslint-plugin-vue'

@@ -1,8 +1,8 @@
 /**
  * M1 认证与用户接口。
  *
- * 与 `backend/app/slices/auth/schemas.py` 一一对应；
- * 接口编号沿用 05-接口设计 §5.1 的 A 组。
+ * 请求和响应字段见 `backend/app/domains/auth/schemas.py`，
+ * 接口编号见 05-接口设计 §5.2。
  */
 
 import { api } from './client'
@@ -20,7 +20,7 @@ export function register(payload: RegisterRequest) {
   return api.post<RegisterData>('/auth/register', payload)
 }
 
-/** A-02 用户登录 */
+/** A-02 校验账号与密码，成功时返回访问和刷新令牌。 */
 export function login(payload: LoginRequest) {
   return api.post<LoginData>('/auth/login', payload)
 }

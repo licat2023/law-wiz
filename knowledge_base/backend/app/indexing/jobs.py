@@ -1,4 +1,4 @@
-"""数据库租约驱动的单处理器；发布必须匹配最新目标修订与租约。"""
+"""通过数据库租约认领和恢复任务。索引发布时校验修订、目标和租约。"""
 
 import asyncio
 import contextlib
@@ -19,15 +19,20 @@ logger = logging.getLogger("knowledge_base.jobs")
 
 
 class LeaseLost(Exception):
+    """任务租约失效或任务目标过期，当前执行应停止。"""
+
     pass
 
 
 class Processor:
+    """串行处理本进程的索引和清理任务，数据库租约用于跨重启认领。"""
+
     def __init__(self, state):
         self.state = state
         self.lock = asyncio.Lock()
 
     async def loop(self):
+        """循环领取任务，队列空闲或处理器暂不可用时按配置间隔重试。"""
         while True:
             try:
                 worked = await self.run_once()
@@ -40,6 +45,7 @@ class Processor:
                 await asyncio.sleep(self.state.settings.worker_poll_seconds)
 
     async def claim(self):
+        """原子认领最早待处理或租约已过期的任务，返回任务 ID 与新租约令牌。"""
         async with self.state.sessions() as db:
             job = await db.scalar(
                 select(ProcessingJob)
@@ -85,6 +91,7 @@ class Processor:
             return (job.id, token) if result.rowcount == 1 else None
 
     async def run_once(self):
+        """尝试处理一个任务。认领成功时返回 True，任务失败会单独记录。"""
         async with self.lock:
             claim = await self.claim()
             if claim is None:
@@ -109,6 +116,7 @@ class Processor:
             return True
 
     async def _heartbeat(self, job_id, token):
+        """按租约期的三分之一续约，仅更新自己持有且仍在处理的任务。"""
         while True:
             await asyncio.sleep(self.state.settings.lease_seconds / 3)
             async with self.state.sessions() as db:
@@ -124,6 +132,7 @@ class Processor:
                 await db.commit()
 
     async def check(self, db, job_id, token):
+        """刷新任务及文档。索引任务不再对应当前目标时，取消并停止处理。"""
         job = await db.get(ProcessingJob, job_id, populate_existing=True)
         if (
             job is None
@@ -145,6 +154,7 @@ class Processor:
         return job, doc
 
     async def stage(self, job_id, token, stage):
+        """在持有有效租约时持久化任务阶段，并同步更新文档状态。"""
         async with self.state.sessions() as db:
             job, doc = await self.check(db, job_id, token)
             job.stage = stage
@@ -152,6 +162,7 @@ class Processor:
             await db.commit()
 
     async def process(self, job_id, token):
+        """执行清理或解析与索引流水线，发布时再次核对目标修订与租约。"""
         async with self.state.sessions() as db:
             job, doc = await self.check(db, job_id, token)
             document_id, revision_number, index_id, kb_id = (
@@ -258,6 +269,7 @@ class Processor:
                     )
                 )
             await db.flush()
+            # 向量已写入。块记录和生效指针在同一数据库事务中提交。
             published = await db.execute(
                 update(Document)
                 .where(
@@ -287,6 +299,7 @@ class Processor:
             await db.commit()
 
     async def fail(self, job_id, token, message):
+        """只为仍持有令牌的处理任务记录失败。清理任务可在次数未用尽时重试。"""
         async with self.state.sessions() as db:
             job = await db.get(ProcessingJob, job_id)
             if job is None or job.lease_token != token or job.status != "processing":

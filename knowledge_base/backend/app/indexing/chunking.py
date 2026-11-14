@@ -1,4 +1,4 @@
-"""固定/语义叶子切分与文档层级；法条父块保持完整。"""
+"""按固定长度或语义距离切分叶块，并为法条保留完整父块。"""
 
 import math
 import re
@@ -13,6 +13,7 @@ from app.errors import invalid
 
 
 class ChunkOptions(BaseModel):
+    # 分块大小按字符计算。固定切分使用重叠设置，语义切分使用余弦距离阈值。
     chunking_strategy: Literal["fixed", "semantic"] = "fixed"
     chunk_size: int = Field(default=800, ge=1, le=8000)
     chunk_overlap: int = Field(default=100, ge=0, le=4000)
@@ -28,6 +29,8 @@ class ChunkOptions(BaseModel):
 
 @dataclass
 class SplitChunk:
+    """建立索引前的块。临时 key 和 parent_key 随后映射为持久化 ID。"""
+
     key: str
     parent_key: str | None
     level: int
@@ -42,6 +45,7 @@ class SplitChunk:
 
 
 def semantic_units(text: str, size: int, *, max_units: int = 10000) -> list[tuple[int, int]]:
+    """按标点和长度生成候选句子的字符区间，供嵌入与正式切分复用。"""
     bounds = []
     for match in re.finditer(r"[^。！？!?\n]+[。！？!?\n]*|[。！？!?\n]+", text):
         for start in range(match.start(), match.end(), size):
@@ -66,6 +70,7 @@ def split_document(
     article_no: str | None = None,
     max_chunks: int = 10000,
 ) -> list[SplitChunk]:
+    """生成可检索叶块和可选父块，语义切分的向量必须按候选区间顺序传入。"""
     if not text.strip():
         return []
     blocks = blocks or markdown_blocks(text)
@@ -148,6 +153,7 @@ def split_document(
                     break
                 cursor = stop - options.chunk_overlap
         else:
+            # 匹配与本节相交的候选句，再裁到父块边界，嵌入仍取自原候选句。
             candidates = [
                 (max(a, start), min(b, end), vector_map[(a, b)])
                 for a, b in units[bisect_right(ends, start) : bisect_left(starts, end)]

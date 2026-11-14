@@ -1,4 +1,6 @@
 #!/bin/sh
+# MySQL 初始化空数据目录时创建独立的知识库和应用账号。
+# 镜像可能以 source 执行脚本，子 shell 将变量与 shell 选项限制在本文件内。
 (
 set -eu
 
@@ -14,6 +16,7 @@ if [ "$KB_MYSQL_DATABASE" = "${MYSQL_DATABASE:-}" ] || [ "$KB_MYSQL_USER" = "${M
     echo 'Knowledge base requires a separate database and non-root user' >&2
     exit 1
 fi
+# 先将密码编码成十六进制，由 MySQL 解码并用 QUOTE 生成动态语句的密码字面量。
 password_hex=$(printf '%s' "$KB_MYSQL_PASSWORD" | od -An -v -tx1 | tr -d ' \n')
 # MySQL treats underscores as wildcards in database-level grants.
 kb_grant_database=$(printf '%s' "$KB_MYSQL_DATABASE" | sed 's/_/\\_/g')

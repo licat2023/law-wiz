@@ -1,9 +1,4 @@
-/**
- * 认证状态（Pinia）。
- *
- * 这里是**端到端参考实现**：其余页面（合同审查、法律问答）按同一模式组织 ——
- * store 只做状态与动作，网络细节在 `api/`，界面在 `views/`。
- */
+/** 管理业务用户的登录状态与资料，认证请求由 API 模块发起。 */
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -23,6 +18,7 @@ export const useAuthStore = defineStore('auth', () => {
     () => user.value?.profile?.real_name || user.value?.phone || user.value?.email || '未登录',
   )
 
+  /** 登录后保存令牌并拉取用户资料。资料请求失败时向调用方抛错。 */
   async function doLogin(payload: LoginRequest) {
     loading.value = true
     try {
@@ -34,6 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /** 创建账号并返回注册结果，后续登录由调用方触发。 */
   async function doRegister(payload: RegisterRequest) {
     loading.value = true
     try {
@@ -55,6 +52,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = await authApi.updateMe(payload)
   }
 
+  /** 尝试撤销服务器端刷新令牌，并始终清理本地登录状态。 */
   async function doLogout() {
     const refreshToken = tokenStore.refresh
     try {

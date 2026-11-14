@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 查看和维护文档修订、解析正文及分块，支持从检索结果定位来源。 */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -49,6 +50,7 @@ const chunks = ref<Chunk[]>([]),
   chunkLoading = ref(false),
   index = ref(String(route.query.index || '')),
   selected = ref(String(route.query.chunk || ''))
+// 检索链接和手动选择会锁定索引，避免轮询刷新时跳到新发布的版本。
 const manualIndex = ref(Boolean(route.query.index))
 const editable = computed(() => ['md', 'markdown'].includes(doc.value?.format || ''))
 const selectedChunk = computed(() => chunks.value.find((chunk) => chunk.id === selected.value))
@@ -78,6 +80,7 @@ const previewLimit = 20_000
 const previewContent = computed(() =>
   previewAll.value ? parsedContent.value : sourceChars.value.slice(0, previewLimit).join(''),
 )
+// 只给匹配修订的正文加高亮，并把全篇偏移换算为当前页内偏移。
 const highlight = computed(() => {
   const offset = (sourcePage.value - 1) * sourcePageSize
   const text = sourceChars.value.slice(offset, offset + sourcePageSize).join('')
@@ -165,6 +168,7 @@ watch(tab, (value) => {
   if (value === 'chunks') void loadLocatedChunks()
   polling.resume()
 })
+/** 打开分块面板时先载入一页，再跨页定位检索结果指定的分块。 */
 async function loadLocatedChunks() {
   await loadChunks()
   if (route.query.chunk) await selectChunk(String(route.query.chunk)).catch(report)
@@ -180,6 +184,7 @@ async function findChildren() {
       )
       matches.push(...data.items.filter((chunk) => chunk.parent_id === parent))
     }
+    // 查询跨多页时，用户可能已经选中另一个父块。
     if (selected.value === parent) related.value = matches
     if (!matches.length) ElMessage.info('该分块没有子块。')
   } catch (error) {
@@ -211,6 +216,7 @@ function open(mode: 'edit' | 'replace' | 'index') {
   editTitle.value = doc.value?.title || ''
   editContent.value = doc.value?.content || ''
   openingContent.value = editContent.value
+  // 保存使用打开表单时的修订，以便后端拒绝覆盖期间发生的并发更新。
   editRevision.value = doc.value?.revision || 0
   metadataText.value = JSON.stringify(doc.value?.metadata || {}, null, 2)
   file.value = undefined

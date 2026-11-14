@@ -1,3 +1,4 @@
+/** 知识库管理 API 的数据结构与各页面共用的状态展示规则。 */
 export interface IndexOptions {
   chunking_strategy: 'fixed' | 'semantic'
   chunk_size: number
@@ -33,6 +34,7 @@ export interface DocumentRecord {
   format: string
   revision: number
   status: string
+  /** 当前供检索使用的索引。新索引就绪前可能仍指向上一次发布的索引。 */
   active_index_id: string | null
   chunk_count: number
   error_message: string | null
@@ -49,7 +51,9 @@ export interface Chunk {
   level: number
   chunk_no: number
   content: string
+  /** 分块在该索引对应的解析正文中的起始码点偏移。 */
   char_start: number
+  /** 分块结束位置的码点偏移，区间不含此位置。 */
   char_end: number
   title_path: string | string[]
   page_number: number | null
@@ -60,6 +64,7 @@ export interface SearchResult {
   knowledge_base_id: string
   document_id: string
   revision: number
+  /** 产生该命中的索引 ID，用于回查同一批分块。 */
   index_revision_id: string
   chunk_id: string
   title: string
@@ -78,6 +83,7 @@ export interface Page<T> {
   page: number
   page_size: number
 }
+/** 新表单尚未加载知识库设置时使用的初始值。 */
 export const defaults: IndexOptions = {
   chunking_strategy: 'fixed',
   chunk_size: 800,
@@ -86,6 +92,7 @@ export const defaults: IndexOptions = {
 }
 export const titlePath = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value.join(' / ') : value || ''
+/** 文档和后台任务共用的轮询判断，兼容两个接口返回的处理阶段。 */
 export const isProcessing = (status: string) =>
   ['pending', 'parsing', 'chunking', 'embedding', 'running', 'processing'].includes(status)
 export const statusLabel = (status: string) =>

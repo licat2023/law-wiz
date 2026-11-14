@@ -6,8 +6,8 @@
  * 1. C-03 仅在任务 succeeded 时可用 → 进入页面先轮询 C-02 到终态再取结果；
  * 2. 风险点必须按 source_type 区分呈现，llm_inference 必须标注"仅供参考"；
  * 3. C-06（误报标记）是模型误报样本的唯一收集途径，界面必须给显式入口；
- * 4. char_start/char_end 基准是 plain_text，本期前端契约里没有该字段，
- *    故不做点击高亮，只展示 clause_text。
+ * 4. 风险点可以带相对于 plain_text 的 char_start / char_end，当前页面通过
+ *    clause_text 展示条款摘录。
  */
 import { Loading } from '@element-plus/icons-vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'

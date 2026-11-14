@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 使用独立的知识库管理账号登录，成功后保存当前标签页的访问令牌。 */
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Collection } from '@element-plus/icons-vue'

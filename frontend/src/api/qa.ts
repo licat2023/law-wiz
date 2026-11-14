@@ -1,7 +1,7 @@
 /**
  * 法律 AI 问答接口（M3 的 E 组）。
  *
- * 后端由 `backend/app/slices/qa/` 提供；函数签名与
+ * 后端由 `backend/app/domains/legal_qa/` 提供，函数签名与
  * docs/05-接口设计.md §5.6 的 E-01 ~ E-05 保持一致。
  */
 
@@ -54,6 +54,7 @@ export function archiveSession(sessionId: string) {
   return api.delete<null>(`/qa/sessions/${sessionId}`)
 }
 
+/** 为一次新提问生成幂等键。同一个请求重放时沿用原键。 */
 export function newIdempotencyKey(): string {
   return crypto.randomUUID()
 }

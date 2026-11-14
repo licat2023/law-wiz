@@ -1,3 +1,4 @@
+# 构建产物、依赖、锁文件和自动生成的类型声明由各自工具维护。
 dist
 node_modules
 pnpm-lock.yaml

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+/** 通过 v-model 编辑知识库默认或单次重建所用的索引参数。 */
 import { computed } from 'vue'
 import type { IndexOptions } from '../types'
 const model = defineModel<IndexOptions>({ required: true })
+// 层级索引与叶子块切分由两个字段表示。切换到层级预设时先使用固定切分。
 const preset = computed({
   get: () => (model.value.hierarchical_index ? 'hierarchy' : model.value.chunking_strategy),
   set: (value: string) => {

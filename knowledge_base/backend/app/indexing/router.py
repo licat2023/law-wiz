@@ -31,6 +31,7 @@ async def index_document(
     user: User,
     idempotency_key: Key = None,
 ):
+    # 按库默认设置合并本次覆盖项，为指定文档修订排队重建索引。
     user.require_write()
     kb = await load_kb(db, user, kb_id)
 
@@ -66,6 +67,7 @@ async def chunks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
+    # 默认读取生效索引，显式传入索引 ID 时也可查看该文档的历史块。
     kb = await load_kb(db, user, kb_id)
     doc = await load_document(db, kb, document_id)
     index = (
@@ -92,6 +94,7 @@ async def chunks(
 
 @router.get("/jobs/{job_id}", response_model=Envelope[dict])
 async def job(job_id: str, request: Request, db: Db, user: User):
+    # 按任务所属文档的知识库验证访问权限，再返回处理进度。
     job = await db.get(ProcessingJob, job_id)
     if job is None:
         raise AppError(40404, "处理任务不存在", 404)

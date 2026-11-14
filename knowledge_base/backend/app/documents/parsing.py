@@ -11,6 +11,8 @@ from app.errors import AppError, invalid
 
 @dataclass
 class TextBlock:
+    """以解析后正文的字符下标记录半开区间，可附带标题路径或页码。"""
+
     start: int
     end: int
     title_path: str = ""
@@ -19,12 +21,15 @@ class TextBlock:
 
 @dataclass
 class ParsedDocument:
+    """统一承载解析后的正文和可定位文本块，PDF 另提供总页数。"""
+
     text: str
     format: str
     blocks: list[TextBlock]
     page_count: int | None = None
 
     def block_data(self):
+        """将文本块转为可存入修订记录的字典列表。"""
         return [asdict(block) for block in self.blocks]
 
 
@@ -35,6 +40,7 @@ def _push_heading(path: list[tuple[int, str]], level: int, title: str):
 
 
 def markdown_blocks(text: str) -> list[TextBlock]:
+    """按围栏外的 ATX 标题拆分原文，保留标题前的内容及原始字符偏移。"""
     headers = []
     fence = None
     offset = 0
@@ -70,6 +76,7 @@ def extract_document(
     max_chars: int = 2_000_000,
     max_unpacked_bytes: int = 64 * 1024 * 1024,
 ) -> ParsedDocument:
+    """同步提取支持格式的文本和定位信息，拒绝超限文件与无正文文件。"""
     if not data or len(data) > max_bytes:
         raise invalid("文件为空或超过上传大小上限")
     fmt = Path(filename).suffix.lower().lstrip(".")
@@ -101,6 +108,7 @@ def _docx(data: bytes, max_unpacked: int) -> ParsedDocument:
     import docx
     from docx.table import Table
 
+    # 先检查压缩包声明的解包体积，再交给文档库解析。
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         if sum(info.file_size for info in archive.infolist()) > max_unpacked:
             raise invalid("Word 解压后大小超过处理上限")

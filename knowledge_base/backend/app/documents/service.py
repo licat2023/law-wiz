@@ -17,6 +17,7 @@ from app.infrastructure.storage import write_file
 
 
 async def load_document(db, kb, document_id):
+    """只读取指定库中的未删除文档，越库访问与不存在统一返回 40402。"""
     doc = await db.get(Document, document_id)
     if doc is None or doc.knowledge_base_id != kb.id or doc.deleted_at is not None:
         raise AppError(40402, "文档不存在或已删除", 404)
@@ -24,6 +25,7 @@ async def load_document(db, kb, document_id):
 
 
 async def revision_of(db, document_id, number):
+    """按文档和修订号查询历史快照，缺失时返回 None。"""
     return await db.scalar(
         select(DocumentRevision).where(
             DocumentRevision.document_id == document_id, DocumentRevision.number == number
@@ -32,6 +34,7 @@ async def revision_of(db, document_id, number):
 
 
 async def document_view(db, doc, *, detail=False):
+    """构造文档响应，详情模式额外提供正文、目标任务和近期索引历史。"""
     result = {
         key: getattr(doc, key)
         for key in (
@@ -92,6 +95,7 @@ async def document_view(db, doc, *, detail=False):
 
 
 def validate_metadata(metadata):
+    """限制元数据的序列化长度，并校验用于检索过滤的生效和废止日期。"""
     if len(json.dumps(metadata, ensure_ascii=False)) > 65536:
         raise invalid("文档元数据超过长度上限")
     for field in ("effective_date", "abolished_date"):
@@ -105,6 +109,7 @@ def validate_metadata(metadata):
 
 
 async def markdown_content(state, body, *, empty_recovery):
+    """按 Markdown 解析正文。迁移缺失正文时允许返回空文本和空块列表。"""
     if empty_recovery:
         return "", []
     parsed = await asyncio.to_thread(
@@ -114,6 +119,7 @@ async def markdown_content(state, body, *, empty_recovery):
 
 
 def mark_empty_recovery(doc):
+    """标记待补录正文的迁移文档，并清除目标索引。"""
     doc.status = "failed"
     doc.error_message = "旧文档没有可恢复的正文，补录正文后可建立索引"
     doc.desired_index_id = None
@@ -122,6 +128,7 @@ def mark_empty_recovery(doc):
 async def create_document(
     db, state, kb, title, filename, fmt, body, metadata, *, content=None, deleted=False, empty_recovery=False
 ):
+    """保存初始修订，可用文档进入索引队列，原文件写入独立于数据库提交。"""
     title = title.strip()
     if not title or len(title) > 300:
         raise invalid("标题需为 1–300 字符")
@@ -174,6 +181,7 @@ async def change_document(
     deleted=False,
     empty_recovery=False,
 ):
+    """以预期修订号写入新版快照，可用版本排队重建，生效索引留待后台发布时切换。"""
     if doc.revision != expected_revision:
         raise AppError(40901, "文档已更新，请刷新后重试", 409)
     old = await revision_of(db, doc.id, doc.revision)
@@ -233,6 +241,7 @@ async def change_document(
 
 
 async def delete_document(db, doc):
+    """软删除文档并停止未完成的索引任务，有可关联的索引时登记后台清理。"""
     cleanup_index_id = doc.desired_index_id or doc.active_index_id
     if cleanup_index_id is None:
         cleanup_index_id = await db.scalar(
@@ -248,7 +257,7 @@ async def delete_document(db, doc):
         .where(ProcessingJob.document_id == doc.id, ProcessingJob.status.in_(["pending", "processing"]))
         .values(status="cancelled", stage="cancelled", lease_token=None, lease_until=None)
     )
-    # 清理任务持久化；向量和文件删除失败可在重启后继续执行。
+    # 持久化清理任务，使后台处理器可在失败后重试，并可在重启后认领未完成任务。
     if cleanup_index_id is not None:
         db.add(
             ProcessingJob(
@@ -272,6 +281,7 @@ async def list_documents(
     law_name=None,
     sort="-created_at",
 ):
+    """分页列出当前库可见文档，支持元数据条件和固定的排序字段。"""
     conditions = [Document.knowledge_base_id == kb.id, Document.deleted_at.is_(None)]
     if query:
         conditions.append(Document.title.contains(query, autoescape=True))

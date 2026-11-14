@@ -16,9 +16,11 @@ from app.infrastructure.vector_store import VectorStore
 
 @asynccontextmanager
 async def lifespan(app):
+    """启动时建立依赖并可选启动处理器，退出时先等待处理器取消再释放连接。"""
     settings = app.state.settings
     settings.check_runtime()
     app.state.grants = parse_grants(settings)
+    # 独立解析入口在进程内一次处理一个文件，避免多份解析缓冲同时占用内存。
     app.state.parse_gate = asyncio.Semaphore(1)
     await asyncio.to_thread((settings.data_root / "files").mkdir, parents=True, exist_ok=True)
     engine, app.state.sessions = database(settings.database_url)

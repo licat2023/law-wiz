@@ -1,10 +1,5 @@
 <script setup lang="ts">
-/**
- * 根组件：顶部导航 + 内容区。
- *
- * 导航项**只列一期已实现的板块** —— 把 P2–P4 的入口画上去但点不开，
- * 会让演示时显得残缺；宁可到实现时再加。
- */
+/** 业务界面外壳，负责全局导航及页面刷新后的用户资料恢复。 */
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
