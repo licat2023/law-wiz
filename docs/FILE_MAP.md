@@ -35,7 +35,7 @@
 下表内以花括号表示同一目录下的多个文件，分工栏同时标明唯一修改负责人。
 
 | 路径 | 职责 | 变更 | 分工 | 状态 | 验证要求或结果 |
-| --- | --- | --- | --- | --- | --- | --- |
+| --- | --- | --- | --- | --- | --- |
 | `backend/app/api/{deps,exception_handlers,health,middleware,ratelimit}.py`、`backend/app/{config,main}.py`、`backend/app/core/{citations,errors,idempotency}.py` | HTTP 依赖、应用装配与公共契约 | 修改注释 | A | 已完成 | Ruff 通过，Python 语法树排除文档字符串后相同，OpenAPI 逐字节一致 |
 | `backend/app/domains/auth/{router,schemas,security,service}.py`、`backend/app/domains/files/{formats,models,router,service}.py` | 账号、令牌与文件生命周期 | 修改注释 | A | 已完成 | Ruff 通过，Python 语法树排除文档字符串后相同，OpenAPI 逐字节一致 |
 | `backend/app/domains/contracts/{models,service}.py`、`backend/app/domains/contract_review/{models,pipeline,risk_rules,router,rule_models,schemas,service}.py`、`backend/app/domains/contract_review/agent/{agent,graph,nodes,schemas,state}.py` | 合同版本、审查任务、规则与 Agent | 修改注释 | A | 已完成 | Ruff 通过，Python 语法树排除文档字符串后相同，OpenAPI 逐字节一致 |
