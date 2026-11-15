@@ -8,7 +8,7 @@
  *    原因：mermaid 12 的 ESM 构建靠 `import ... from "./chunks/..."` 加载几十个
  *    分块，内联到 HTML 后这些相对路径在 file:// 下解析不到，模块静默不加载
  *    （2026-09-13 实测踩过此坑）。UMD 构建是单文件、零相对 import，稳定可用。
- * 3. **Markdown 中的 Mermaid 源码始终是权威版本**；本脚本只产出交付用的位图，
+ * 3. **docs/assets/*.mmd 始终是插图的权威源码**；本脚本产出交付用的 SVG 和 PNG，
  *    从此图有源码，不再出现"只有位图改不动"的情况。
  *
  * 用法：node render-mmd.mjs <输入.mmd> <输出前缀> [宽度px]
@@ -19,8 +19,9 @@
  *   CHROME_PATH  浏览器可执行文件路径（默认自动探测 Chrome / Edge）
  *   MMD_NODE_SPACING / MMD_RANK_SPACING  流程图的节点间距和层级间距（默认 45 / 70）
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -77,7 +78,7 @@ const html = `<!DOCTYPE html>
 <style>
   html,body { margin:0; padding:0; background:#ffffff; }
   #out { display:inline-block; padding:28px; }
-  #out svg { display:block; }
+  #out svg { display:block; width:${WIDTH}px; height:auto; }
 </style>
 </head><body>
 <div id="out"></div>
@@ -128,14 +129,23 @@ const scratchUrl = pathToFileURL(scratch).href;
 
 const svgOut = resolve(`${outPrefix}.svg`);
 const pngOut = resolve(`${outPrefix}.png`);
-const profileDir = join(assetsDir, '.chrome-profile');
+const profileRoot = resolve(tmpdir());
+const profileDir = mkdtempSync(join(profileRoot, 'law-wiz-mermaid-'));
+process.on('exit', () => {
+  rmSync(scratch, { force: true });
+  const profileRelative = relative(profileRoot, resolve(profileDir));
+  if (profileRelative && !profileRelative.startsWith('..') && !isAbsolute(profileRelative)) {
+    rmSync(profileDir, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
 
 function chromeRun(args) {
   return new Promise((res) => {
-    const p = spawn(chrome, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(chrome, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let out = '', err = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
+    p.on('error', (error) => res({ code: -1, out, err: error.message }));
     p.on('close', (code) => res({ code, out, err }));
   });
 }
@@ -202,7 +212,6 @@ const shotRes = await chromeRun([
   scratchUrl,
 ]);
 rmSync(scratch, { force: true });
-rmSync(profileDir, { recursive: true, force: true });
 
 if (!existsSync(pngOut)) {
   console.error('截图未生成。浏览器 stderr（截断）：');
