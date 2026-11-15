@@ -5,7 +5,9 @@
 
 业务 FastAPI 运行合同审查与法律问答 Agent。知识库独立运行，持有文档、索引和 Chroma。两个后端各用自己的数据库和 Python 环境。
 
-重构或跨目录修改前，维护 [施工清单](docs/FILE_MAP.md) 中的目录职责、文件范围、状态和验证结果。
+开始、恢复或接手需要施工记录的工作前，先读 [任务总索引](docs/tasks/README.md)。已有对应任务时再读主文档，核对有效需求、当前理解、状态、负责人、依赖和已有改动。文件范围、施工进度和验证记录维护在 [任务目录](docs/tasks/) 对应主文档中。
+
+[目录说明](docs/FILE_MAP.md) 记录实际目录和文件职责。目录结构或职责变化时同步更新。
 
 ## 仓库布局
 
@@ -16,8 +18,8 @@
 | `knowledge_base/backend/` | 知识库 FastAPI、文档入库、索引和检索 |
 | `knowledge_base/frontend/` | 知识库管理界面 |
 | `deploy/` | 部署编排与数据库账号初始化 |
-| `docs/` | 设计、接口、架构决策和施工清单 |
-| `tools/` | 文档辅助工具 |
+| `docs/` | 设计、接口、架构决策和任务记录 |
+| `tools/` | 语料和文档辅助工具 |
 
 `contracts/` 管合同版本和正文，`contract_review/` 管审查任务、规则和报告。两个 Agent 各自归审查或问答领域。新增业务 ORM 模型须登记到 `app/infrastructure/database/models.py`。知识库模型登记在 `app/infrastructure/models.py`。
 
@@ -28,6 +30,8 @@
 各后端执行 `uv sync --frozen --extra dev`、`uv run --extra dev ruff check app` 和 `uv run --extra dev ruff format --check app`。各前端执行 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm run build`。
 
 空库初始化见 [业务后端](backend/README.md)、[知识库](knowledge_base/README.md) 和 [部署说明](deploy/README.md)。通过 [Demo 指南](docs/06-MVP演示指南.md) 核对入库、审查报告与问答引用。
+
+从公开栏目采集法规、用 Docling 转换和修订入库时，见 [法规语料工具](tools/legal-corpus/README.md)。
 
 ## 硬性约束
 
