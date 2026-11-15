@@ -259,6 +259,15 @@ export interface QaMessage {
   created_at: string
 }
 
+/** 追问会话的报告定位，原报告失效后仍可读取历史。 */
+export interface QaReviewContext {
+  review_task_id: string
+  risk_point_id: string | null
+  contract_title: string | null
+  risk_label: string | null
+  available: boolean
+}
+
 export interface QaSession {
   session_id: string
   title: string | null
@@ -266,6 +275,7 @@ export interface QaSession {
   message_count: number
   last_message_at?: string | null
   created_at: string
+  review_context?: QaReviewContext | null
 }
 
 export interface QaSessionDetail extends QaSession {

@@ -8,9 +8,11 @@
 import { api, http } from './client'
 import type { Page, QaSession, QaSessionDetail } from './types'
 
-/** E-01 创建问答会话 */
-export function createSession(title?: string) {
-  return api.post<QaSession>('/qa/sessions', title ? { title } : {})
+/** E-01 创建问答会话，可关联已完成报告及任务内风险点。 */
+export function createSession(
+  payload: { title?: string; review_task_id?: string; risk_point_id?: string } = {},
+) {
+  return api.post<QaSession>('/qa/sessions', payload)
 }
 
 /** E-02 会话列表 */

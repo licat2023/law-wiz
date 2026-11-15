@@ -15,6 +15,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type TagProps } from 'element-plus'
 
 import { http } from '@/api/client'
+import { createSession } from '@/api/qa'
 import { dismissRiskPoint, getReviewResult, getReviewTask } from '@/api/review'
 import type {
   ReviewResultData,
@@ -60,6 +61,7 @@ const stageText = ref('')
 const failedMessage = ref('')
 const result = ref<ReviewResultData | null>(null)
 const dismissing = ref(false)
+const openingRisk = ref<string | null>(null)
 
 let disposed = false
 onUnmounted(() => {
@@ -120,6 +122,20 @@ async function toggleDismiss(rp: RiskPoint) {
     ElMessage.error(e instanceof Error ? e.message : '操作失败，请稍后重试')
   } finally {
     dismissing.value = false
+  }
+}
+
+/** 由服务端确认报告及风险归属后进入问答，URL 保留会话定位。 */
+async function followUp(risk: RiskPoint) {
+  if (openingRisk.value) return
+  openingRisk.value = risk.id
+  try {
+    const session = await createSession({ review_task_id: taskId, risk_point_id: risk.id })
+    if (!disposed) await router.push({ name: 'qa', query: { session: session.session_id } })
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '无法开始风险追问')
+  } finally {
+    openingRisk.value = null
   }
 }
 
@@ -260,6 +276,15 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
           <p v-if="rp.legal_basis" class="legal-basis">法律依据：{{ rp.legal_basis }}</p>
 
           <div class="risk-actions">
+            <el-button
+              type="primary"
+              link
+              :loading="openingRisk === rp.id"
+              :disabled="openingRisk !== null"
+              @click="followUp(rp)"
+            >
+              就此风险追问
+            </el-button>
             <el-button
               link
               :type="rp.is_dismissed ? 'info' : 'danger'"
