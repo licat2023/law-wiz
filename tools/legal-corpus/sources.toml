@@ -1,0 +1,15 @@
+namespace = "cq-commerce"
+id_pattern = '/t\d+_(\d+)\.html$'
+body = ".trs_editor_view"
+
+[[sections]]
+list_url = "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/xzfg/"
+links = ".zsj-fr-main > li > a"
+next = 'a:text-is("下一页")'
+doc_type = "regulation"
+
+[[sections]]
+list_url = "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/bmgz/"
+links = ".zsj-fr-main > li > a"
+next = 'a:text-is("下一页")'
+doc_type = "local_regulation"
