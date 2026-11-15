@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 查看和维护文档修订、解析正文及分块，支持从检索结果定位来源。 */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, EditPen, Refresh, Upload } from '@element-plus/icons-vue'
@@ -22,6 +22,7 @@ import { usePolling } from '../polling'
 import { sourceParts } from '../markdown'
 import SafeMarkdown from '../components/SafeMarkdown.vue'
 import IndexSettings from '../components/IndexSettings.vue'
+import MetadataEditor from '../components/MetadataEditor.vue'
 const route = useRoute(),
   router = useRouter(),
   kb = String(route.params.kb),
@@ -40,10 +41,12 @@ const tab = ref(String(route.query.tab || 'preview')),
   editContent = ref(''),
   openingContent = ref(''),
   editRevision = ref(0),
-  metadataText = ref('{}'),
+  editMetadata = ref<Record<string, unknown>>({}),
   file = ref<File>(),
   editPreview = ref(false),
   options = ref<IndexOptions>({ ...defaults })
+const metadataEditor = useTemplateRef('metadataEditor')
+const metadataEntries = computed(() => Object.entries(doc.value?.metadata ?? {}))
 const chunks = ref<Chunk[]>([]),
   chunkTotal = ref(0),
   chunkPage = ref(1),
@@ -218,7 +221,7 @@ function open(mode: 'edit' | 'replace' | 'index') {
   openingContent.value = editContent.value
   // 保存使用打开表单时的修订，以便后端拒绝覆盖期间发生的并发更新。
   editRevision.value = doc.value?.revision || 0
-  metadataText.value = JSON.stringify(doc.value?.metadata || {}, null, 2)
+  editMetadata.value = doc.value?.metadata ?? {}
   file.value = undefined
   editPreview.value = false
   if (base.value)
@@ -234,30 +237,20 @@ function open(mode: 'edit' | 'replace' | 'index') {
 function choose(event: Event) {
   file.value = (event.target as HTMLInputElement).files?.[0]
 }
-function metadata() {
-  let value: unknown
-  try {
-    value = JSON.parse(metadataText.value)
-  } catch {
-    throw new Error('元数据必须是有效的 JSON 对象。')
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('元数据必须是 JSON 对象，不能是数组。')
-  return value
-}
 async function save() {
   if (!doc.value) return
   busy.value = true
   formError.value = ''
   try {
     if (dialog.value === 'edit') {
+      if (!metadataEditor.value) return
       if (!editTitle.value.trim()) throw new Error('请填写文档标题。')
       const contentChanged = editable.value && editContent.value !== openingContent.value
       if (contentChanged && !editContent.value.trim()) throw new Error('Markdown 正文不能为空。')
       await patch(path, {
         revision: editRevision.value,
         title: editTitle.value.trim(),
-        metadata: metadata(),
+        metadata: metadataEditor.value.readMetadata(),
         ...(contentChanged ? { content: editContent.value } : {}),
       })
     } else if (dialog.value === 'replace') {
@@ -534,8 +527,14 @@ onMounted(load)
         <dt>更新时间</dt>
         <dd>{{ formatDate(doc.updated_at) }}</dd>
       </dl>
-      <h3>来源与法律元数据</h3>
-      <pre class="metadata-code">{{ JSON.stringify(doc.metadata, null, 2) }}</pre>
+      <h3>元数据</h3>
+      <dl v-if="metadataEntries.length" class="metadata-list">
+        <div v-for="[key, value] in metadataEntries" :key="key">
+          <dt>{{ key || '""' }}</dt>
+          <dd>{{ typeof value === 'string' && value ? value : JSON.stringify(value, null, 2) }}</dd>
+        </div>
+      </dl>
+      <p v-else class="muted">暂无元数据。</p>
       <div class="info-actions">
         <el-button :icon="EditPen" @click="open('edit')">编辑元数据</el-button
         ><el-button :icon="Upload" @click="open('replace')">替换文件</el-button
@@ -572,17 +571,11 @@ onMounted(load)
                 v-model="editContent"
                 type="textarea"
                 :rows="12" /></el-form-item></template
-          ><el-form-item label="来源与法律元数据（JSON 对象）" for="edit-metadata"
-            ><el-input
-              id="edit-metadata"
-              v-model="metadataText"
-              type="textarea"
-              :rows="7"
-              class="code-input"
-          /></el-form-item>
-          <p class="hint">
-            常用字段：law_name、article_no、doc_type、corpus_tier、effective_date、abolished_date。原有自定义字段会保留，直到你在此修改。
-          </p></template
+          ><MetadataEditor
+            v-if="dialogOpen"
+            ref="metadataEditor"
+            :initial-value="editMetadata"
+            :disabled="busy" /></template
         ><template v-else-if="dialog === 'replace'"
           ><p class="hint">替换后生成新修订并自动索引。新索引就绪前，现有索引继续可用。</p>
           <label for="replace-file" class="file-picker"

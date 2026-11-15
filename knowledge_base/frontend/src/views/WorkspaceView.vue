@@ -406,7 +406,7 @@ onMounted(load)
             v-model="query"
             type="textarea"
             :rows="3"
-            placeholder="例如：合同解除需要满足哪些条件？"
+            placeholder="输入要检索的问题"
         /></el-form-item>
         <div class="form-pair">
           <el-form-item label="返回数量"
@@ -417,7 +417,7 @@ onMounted(load)
             ><el-input v-model="corpusTier" placeholder="可选"
           /></el-form-item>
         </div>
-        <el-checkbox v-model="includeAbolished">包含已废止资料</el-checkbox>
+        <el-checkbox v-model="includeAbolished">包含已失效内容</el-checkbox>
         <p v-if="searchError" role="alert" class="error-text">{{ searchError }}</p>
         <el-button type="primary" native-type="submit" :icon="Search" :loading="searching"
           >开始检索</el-button
@@ -432,7 +432,7 @@ onMounted(load)
       <el-skeleton v-if="searching" :rows="5" animated />
       <el-alert
         v-if="articleLimitReached"
-        title="部分法条超过完整引用长度上限，未列入结果。"
+        title="部分内容超过完整引用长度上限，未列入结果。"
         type="warning"
         :closable="false"
       />
@@ -449,7 +449,7 @@ onMounted(load)
           </header>
           <SafeMarkdown :content="item.content" />
           <details v-if="item.article_chunk_id && articleContents[item.article_chunk_id]">
-            <summary>展开完整条文</summary>
+            <summary>展开完整上下文</summary>
             <SafeMarkdown :content="articleContents[item.article_chunk_id]" />
           </details>
           <details v-else-if="item.parent_content && item.parent_content !== item.content">
