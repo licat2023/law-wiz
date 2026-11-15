@@ -38,6 +38,26 @@ class Chunk(Base, Identity):
     is_leaf: Mapped[bool] = mapped_column(default=True)
 
 
+class KeywordLeaf(Base):
+    """BM25 的叶块长度，与同一批次的 Chroma ID 共用主键。"""
+
+    __tablename__ = "kb_keyword_leaf"
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("kb_chunk.id"), primary_key=True)
+    index_id: Mapped[str] = mapped_column(ForeignKey("kb_index_revision.id"), index=True)
+    length: Mapped[int] = mapped_column(Integer)
+
+
+class KeywordPosting(Base):
+    """保存归一化词项在单个叶块中的频次。摘要使匹配独立于数据库排序规则。"""
+
+    __tablename__ = "kb_keyword_posting"
+    term: Mapped[str] = mapped_column(String(32), primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(
+        ForeignKey("kb_keyword_leaf.chunk_id"), primary_key=True, index=True
+    )
+    frequency: Mapped[int] = mapped_column(Integer)
+
+
 class ProcessingJob(Base, Identity):
     """记录索引或清理工作的执行阶段、认领次数和可过期的租约。"""
 

@@ -76,6 +76,31 @@ export interface SearchResult {
   char_end: number
   page_number: number | null
   metadata: Record<string, unknown>
+  retrieval_sources?: ('vector' | 'keyword')[]
+  ranks?: { vector: number | null; keyword: number | null; fused: number; rerank: number | null }
+}
+export type SearchStrategy = 'vector' | 'hybrid' | 'reranked'
+export interface SearchCandidate {
+  chunk_id: string
+  score: number
+}
+export interface SearchStage {
+  status: string
+  indexed_versions?: number | null
+  candidates: SearchCandidate[]
+}
+export interface SearchDiagnostics {
+  strategy: SearchStrategy
+  vector: SearchStage
+  keyword: SearchStage
+  fused: SearchCandidate[]
+  rerank: SearchStage
+}
+export interface SearchResponse {
+  items: SearchResult[]
+  article_contents: Record<string, string>
+  article_limit_reached: boolean
+  diagnostics?: SearchDiagnostics
 }
 export interface Page<T> {
   items: T[]

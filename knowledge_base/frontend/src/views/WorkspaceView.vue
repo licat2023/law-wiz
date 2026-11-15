@@ -1,15 +1,17 @@
 <script setup lang="ts">
 /** 管理单个知识库的文档导入、索引任务和检索验证。 */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, EditPen, Search, Document } from '@element-plus/icons-vue'
-import { get, post, remove, request, basePath, documentPath } from '../api'
+import { get, post, remove, request, basePath, documentPath, searchKnowledgeBase } from '../api'
 import {
   type KnowledgeBase,
   type DocumentRecord,
   type Page,
   type SearchResult,
+  type SearchDiagnostics,
+  type SearchStrategy,
   formatDate,
   statusLabel,
   isProcessing,
@@ -44,12 +46,37 @@ const query = ref(''),
   includeAbolished = ref(false),
   docType = ref(''),
   corpusTier = ref(''),
+  searchStrategy = ref<SearchStrategy | ''>(''),
   results = ref<SearchResult[]>([]),
+  searchDiagnostics = ref<SearchDiagnostics>(),
   articleContents = ref<Record<string, string>>({}),
   articleLimitReached = ref(false),
   searched = ref(false),
   searching = ref(false),
   searchError = ref('')
+const strategyLabels = { vector: '向量', hybrid: '混合召回', reranked: '混合召回与重排' }
+const searchStatusLabels: Record<string, string> = {
+  ok: '成功',
+  skipped: '未启用',
+  legacy: '待重建关键词索引',
+  partial: '部分版本可检索',
+  fingerprint_changed: '嵌入配置变更，待重建',
+  unavailable: '暂不可用',
+  disabled: '未配置',
+  fallback: '暂不可用，使用融合顺序',
+  no_candidates: '无候选',
+}
+const searchStages = computed(() => {
+  const data = searchDiagnostics.value
+  return data
+    ? [
+        { name: '向量', ...data.vector },
+        { name: '关键词', ...data.keyword },
+        { name: '融合', status: '', candidates: data.fused },
+        { name: '重排', ...data.rerank },
+      ]
+    : []
+})
 // 轮询沿用上次提交的条件，表单输入只有在应用筛选后才生效。
 const applied = ref({ query: '', status: '', format: '' })
 const busyDocument = ref('')
@@ -177,23 +204,22 @@ async function search() {
   searchError.value = ''
   searched.value = false
   results.value = []
+  searchDiagnostics.value = undefined
   articleContents.value = {}
   articleLimitReached.value = false
   try {
-    const data = await post<{
-      items: SearchResult[]
-      article_contents?: Record<string, string>
-      article_limit_reached?: boolean
-    }>(`${path}/search`, {
+    const data = await searchKnowledgeBase(kb, {
       query: query.value.trim(),
       top_k: topK.value,
       include_abolished: includeAbolished.value,
       ...(docType.value ? { doc_type: docType.value } : {}),
-      ...(corpusTier.value ? { corpus_tier: corpusTier.value } : {}),
+      ...(corpusTier.value ? { corpus_tier: Number(corpusTier.value) } : {}),
+      ...(searchStrategy.value ? { strategy: searchStrategy.value } : {}),
     })
     results.value = data.items
     articleContents.value = data.article_contents ?? {}
     articleLimitReached.value = data.article_limit_reached ?? false
+    searchDiagnostics.value = data.diagnostics
     searched.value = true
   } catch (e) {
     searchError.value = e instanceof Error ? e.message : '检索失败。'
@@ -417,6 +443,17 @@ onMounted(load)
             ><el-input v-model="corpusTier" placeholder="可选"
           /></el-form-item>
         </div>
+        <el-form-item label="检索方式">
+          <el-select v-model="searchStrategy" aria-label="检索方式">
+            <el-option label="服务默认" value="" />
+            <el-option
+              v-for="(label, strategy) in strategyLabels"
+              :key="strategy"
+              :label="label"
+              :value="strategy"
+            />
+          </el-select>
+        </el-form-item>
         <el-checkbox v-model="includeAbolished">包含已失效内容</el-checkbox>
         <p v-if="searchError" role="alert" class="error-text">{{ searchError }}</p>
         <el-button type="primary" native-type="submit" :icon="Search" :loading="searching"
@@ -430,6 +467,20 @@ onMounted(load)
         <p>检索结果将显示在这里</p>
       </div>
       <el-skeleton v-if="searching" :rows="5" animated />
+      <details v-if="searchDiagnostics">
+        <summary>查看各阶段候选 · {{ strategyLabels[searchDiagnostics.strategy] }}</summary>
+        <div v-for="stage in searchStages" :key="stage.name">
+          <p class="tiny">
+            {{ stage.name }} · {{ stage.candidates.length }} 个候选
+            <template v-if="stage.status"> · {{ searchStatusLabels[stage.status] }}</template>
+          </p>
+          <ol v-if="stage.candidates.length">
+            <li v-for="candidate in stage.candidates" :key="candidate.chunk_id" class="tiny">
+              <code>{{ candidate.chunk_id }}</code> · {{ candidate.score.toFixed(3) }}
+            </li>
+          </ol>
+        </div>
+      </details>
       <el-alert
         v-if="articleLimitReached"
         title="部分内容超过完整引用长度上限，未列入结果。"
@@ -447,6 +498,12 @@ onMounted(load)
             <h3>{{ i + 1 }}. {{ item.title }}</h3>
             <span class="score">相关度 {{ Number(item.score).toFixed(3) }}</span>
           </header>
+          <p v-if="item.ranks" class="tiny">
+            <template v-if="item.ranks.vector">向量第 {{ item.ranks.vector }} · </template>
+            <template v-if="item.ranks.keyword">关键词第 {{ item.ranks.keyword }} · </template>
+            融合第 {{ item.ranks.fused }}
+            <template v-if="item.ranks.rerank"> · 重排第 {{ item.ranks.rerank }}</template>
+          </p>
           <SafeMarkdown :content="item.content" />
           <details v-if="item.article_chunk_id && articleContents[item.article_chunk_id]">
             <summary>展开完整上下文</summary>

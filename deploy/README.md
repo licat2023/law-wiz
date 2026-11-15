@@ -35,6 +35,16 @@ docker compose -f docker-compose.prod.yml up -d --wait backend
 
 MySQL 首次启动通过 `mysql-init/20-knowledge-base.sh` 创建独立知识库及账号。已有卷跳过镜像初始化脚本。业务文件卷为 `lawwiz-data`，知识库原文件和 Chroma 位于 `lawwiz-kb-data`，数据库位于 `lawwiz-mysql`。
 
+已有数据库升级时，先按业务后端说明审核并执行报告追问迁移 SQL，再按知识库说明创建关键词表。知识库构建成功后，可以在本目录用一次性容器访问内部数据库，先以 `--schema-sql` 审核，再以 `--create-tables` 应用结构变更。知识库启动后用同一命令入口和 `--knowledge-base <库ID>` 分批排入重建任务。[业务后端说明](../backend/README.md) · [知识库升级](../knowledge_base/README.md#已有库升级)
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm --no-deps \
+  -v ../knowledge_base/backend/scripts:/app/scripts:ro knowledge-base \
+  python -m scripts.rebuild_keyword_index --schema-sql
+```
+
+Compose 默认启用混合检索。可通过部署 `.env` 的 `KB_RETRIEVAL_STRATEGY` 选择向量、混合或重排。重排服务按目标环境的资源预算独立部署，完整端点和调用限制通过 `KB_RERANK_*` 配置。
+
 ## 站点与健康检查
 
 在 `frontend/` 和 `knowledge_base/frontend/` 分别执行 `pnpm install --frozen-lockfile` 与 `pnpm run build`。将两个 `dist/` 发布到各自静态站点，分别把同站点的 `/api` 代理到对应后端。业务站点需将前端页面路由回退至 `index.html`。

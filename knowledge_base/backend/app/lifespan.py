@@ -11,6 +11,7 @@ from app.indexing.jobs import Processor
 from app.infrastructure.database import database
 from app.infrastructure.embedding import DevelopmentEmbedding, RemoteEmbedding
 from app.infrastructure.models import Base
+from app.infrastructure.reranking import RemoteReranker
 from app.infrastructure.vector_store import VectorStore
 
 
@@ -42,6 +43,13 @@ async def lifespan(app):
             )
         )
         app.state.vector = await asyncio.to_thread(VectorStore, settings.data_root / "chroma")
+        app.state.reranker = (
+            RemoteReranker(
+                client, settings.rerank_endpoint, settings.rerank_api_key, settings.rerank_timeout_seconds
+            )
+            if settings.rerank_endpoint
+            else None
+        )
         app.state.processor = Processor(app.state)
         if settings.worker_enabled:
             worker = asyncio.create_task(app.state.processor.loop())

@@ -1,5 +1,6 @@
 /** 封装知识库管理 API 的鉴权、JSON 响应与文件下载。 */
 import { ref } from 'vue'
+import type { SearchResponse, SearchStrategy } from './types'
 
 const tokenKey = 'kb-admin-token'
 /** 当前标签页是否持有管理令牌。服务端拒绝令牌时由请求层清理。 */
@@ -70,6 +71,18 @@ export const basePath = (id: string) => `/knowledge-bases/${encodeURIComponent(i
 /** 生成指定知识库下的文档端点路径。 */
 export const documentPath = (kb: string, doc: string) =>
   `${basePath(kb)}/documents/${encodeURIComponent(doc)}`
+/** 为管理端检索测试返回各阶段的候选排名。 */
+export const searchKnowledgeBase = (
+  kb: string,
+  options: {
+    query: string
+    top_k: number
+    include_abolished: boolean
+    doc_type?: string
+    corpus_tier?: number
+    strategy?: SearchStrategy
+  },
+) => post<SearchResponse>(`${basePath(kb)}/search`, { ...options, diagnostics: true })
 /** 通过带认证头的请求读取文档原件，并以指定文件名触发浏览器下载。 */
 export async function download(path: string, filename: string) {
   const response = await fetch(`/api${path}/file`, { headers: headers() })

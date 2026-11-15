@@ -12,6 +12,7 @@ from app.documents.parsing import TextBlock, extract_document
 from app.documents.service import revision_of
 from app.errors import AppError
 from app.indexing.chunking import ChunkOptions, semantic_units, split_document
+from app.indexing.keyword import delete_keyword_indexes, write_keyword_index
 from app.indexing.models import Chunk, IndexRevision, ProcessingJob
 from app.infrastructure.database import new_id, now
 
@@ -173,6 +174,9 @@ class Processor:
             )
             if job.stage == "cleanup":
                 await asyncio.to_thread(self.state.vector.delete_document, document_id)
+                await delete_keyword_indexes(
+                    db, select(IndexRevision.id).where(IndexRevision.document_id == document_id)
+                )
                 revisions = (
                     await db.scalars(
                         select(DocumentRevision).where(DocumentRevision.document_id == document_id)
@@ -189,6 +193,7 @@ class Processor:
                 return
             index = await db.get(IndexRevision, index_id)
             options = ChunkOptions.model_validate(index.options)
+            title = doc.title
             revision = await revision_of(db, document_id, revision_number)
             text, blocks_data, metadata = revision.content, revision.blocks, revision.source_metadata
             file_key, filename = revision.file_key, revision.filename
@@ -250,6 +255,8 @@ class Processor:
         )
         async with self.state.sessions() as db:
             job, doc = await self.check(db, job_id, token)
+            previous_index_id = doc.active_index_id
+            await delete_keyword_indexes(db, [index_id])
             await db.execute(delete(Chunk).where(Chunk.index_id == index_id))
             for chunk in chunks:
                 db.add(
@@ -269,7 +276,8 @@ class Processor:
                     )
                 )
             await db.flush()
-            # 向量已写入。块记录和生效指针在同一数据库事务中提交。
+            await write_keyword_index(db, index_id, leaves, identifiers, title)
+            # 向量已写入。倒排、块记录和生效指针在同一数据库事务中提交。
             published = await db.execute(
                 update(Document)
                 .where(
@@ -294,6 +302,8 @@ class Processor:
                 raise LeaseLost()
             index = await db.get(IndexRevision, index_id)
             index.status, index.fingerprint = "ready", fingerprint
+            if previous_index_id and previous_index_id != index_id:
+                await delete_keyword_indexes(db, [previous_index_id])
             job.status, job.stage = "succeeded", "ready"
             job.lease_until, job.lease_token = None, None
             await db.commit()

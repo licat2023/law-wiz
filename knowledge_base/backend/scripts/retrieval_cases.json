@@ -1,0 +1,37 @@
+[
+  {
+    "name": "法条编号",
+    "query": "政务数据共享条例第14条",
+    "relevant": [{"law_name": "政务数据共享条例", "article_no": "第十四条"}],
+    "source": "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/xzfg/202601/t20260105_15292011.html"
+  },
+  {
+    "name": "精确术语",
+    "query": "无条件共享、有条件共享和不予共享的分类依据",
+    "relevant": [{"law_name": "政务数据共享条例", "article_no": "第十四条"}],
+    "source": "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/xzfg/202601/t20260105_15292011.html"
+  },
+  {
+    "name": "口语问法",
+    "query": "政府部门互相提供手头的数据，这么做主要想解决什么问题？",
+    "relevant": [{"law_name": "政务数据共享条例", "article_no": "第一条"}],
+    "source": "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/xzfg/202601/t20260105_15292011.html"
+  },
+  {
+    "name": "近义歧义",
+    "query": "重庆出台的规范性文件，制定之后的备案、清理和监督都归这部办法管吗？",
+    "relevant": [{"law_name": "重庆市行政规范性文件管理办法", "article_no": "第二条"}],
+    "source": "https://sww.cq.gov.cn/zwgk_247/zfxxgkml/lzyj/bmgz/202312/t20231213_12699787.html"
+  },
+  {
+    "name": "失效条文",
+    "query": "渝府令第290号 重庆市行政规范性文件管理办法",
+    "relevant": [],
+    "excluded_source": "https://www.cq.gov.cn/zwgk/zfxxgkml/szfwj/fzhsxgz/fzhsxzfgz/201508/t20150817_8836607.html"
+  },
+  {
+    "name": "样本库无答案",
+    "query": "南极陨石遥控器的月球信号计费周期是多久？",
+    "relevant": []
+  }
+]

@@ -1,8 +1,12 @@
 """检索条件及上下文请求。"""
 
+from typing import Literal
+
 from pydantic import Field
 
 from app.api.responses import Payload
+
+RetrievalStrategy = Literal["vector", "hybrid", "reranked"]
 
 
 class SearchRequest(Payload):
@@ -12,3 +16,5 @@ class SearchRequest(Payload):
     include_abolished: bool = False
     doc_type: str | None = None
     corpus_tier: int | None = None
+    strategy: RetrievalStrategy | None = None
+    diagnostics: bool = False

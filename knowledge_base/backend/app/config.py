@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     embedding_model: str = ""
     embedding_dimensions: int = Field(default=1536, ge=1, le=65536)
     request_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    retrieval_strategy: Literal["vector", "hybrid", "reranked"] = "vector"
+    retrieval_candidates: int = Field(default=24, ge=1, le=100)
+    rerank_endpoint: str = Field(default="", repr=False)
+    rerank_api_key: str = Field(default="", repr=False)
+    rerank_timeout_seconds: float = Field(default=2, gt=0, le=10)
+    rerank_candidates: int = Field(default=16, ge=1, le=50)
     worker_enabled: bool = True
     worker_poll_seconds: float = Field(default=1, gt=0, le=60)
     lease_seconds: int = Field(default=300, ge=10, le=3600)
