@@ -11,7 +11,7 @@ from threading import Thread
 import httpx
 from playwright.sync_api import sync_playwright
 
-from collect import collect
+from collect import _attempt, _navigate, collect
 from convert import clean_markdown, convert_batch
 from ingest import upload
 from storage import store_file, write_json
@@ -59,6 +59,23 @@ def source_server():
 
 
 class CorpusTests(unittest.TestCase):
+    def test_browser_retries_transient_connection_reset(self):
+        with sync_playwright() as playwright, playwright.chromium.launch() as browser:
+            page = browser.new_page()
+            calls = []
+
+            def respond(route):
+                calls.append(route.request.url)
+                if len(calls) == 1:
+                    route.abort("connectionreset")
+                else:
+                    route.fulfill(status=200, body="recovered")
+
+            page.route("https://example.test/source", respond)
+            _attempt(2, 0, _navigate, page, "https://example.test/source")
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(page.locator("body").inner_text(), "recovered")
+
     def test_multiple_pages_keep_stable_identity_and_retry_failed_detail(self):
         with (
             tempfile.TemporaryDirectory() as temp,

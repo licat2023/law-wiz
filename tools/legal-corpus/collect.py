@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
+from playwright.sync_api import Error as BrowserError
 from playwright.sync_api import TimeoutError as BrowserTimeout
 
 from storage import read_json, store_file, write_json
@@ -17,6 +18,9 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 ATTACHMENTS = {".pdf": "pdf", ".docx": "docx"}
 DATE = r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}-\d{1,2}-\d{1,2})"
 ATTACHMENT_LINK = re.compile(r"""downloadFj\(\s*['"][^'"]*['"]\s*,\s*['"]([^'"]+)['"]""")
+TRANSIENT_NAVIGATION = re.compile(
+    r"net::ERR_(?:CONNECTION_(?:RESET|CLOSED|REFUSED|TIMED_OUT)|EMPTY_RESPONSE|NETWORK_CHANGED|NAME_NOT_RESOLVED)\b"
+)
 
 
 def _date_metadata(body, page_date):
@@ -104,9 +108,15 @@ def _download(client, url):
 
 
 def _navigate(page, url):
-    response = page.goto(url, wait_until="domcontentloaded")
+    try:
+        response = page.goto(url, wait_until="domcontentloaded")
+    except BrowserError as exc:
+        if failure := TRANSIENT_NAVIGATION.search(exc.message):
+            raise TemporarySourceError(failure[0]) from exc
+        raise
     if response is None:
         raise ValueError("页面没有 HTTP 响应")
+    _source_url(url, response.url)
     _check_status(response.status)
 
 
@@ -262,7 +272,7 @@ def collect(browser, source, root, *, max_pages, max_items, delay=1, attempts=3,
                 else:
                     try:
                         result = _detail(page, client, robots, source, item, root, run)
-                    except (ValueError, BrowserTimeout, TemporarySourceError, httpx.TransportError) as exc:
+                    except (ValueError, BrowserError, TemporarySourceError, httpx.TransportError) as exc:
                         result = item | {"status": "failed", "error": str(exc)}
                     status = result["status"]
                     records[item["id"]] = result
