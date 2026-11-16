@@ -4,24 +4,7 @@
 
 ## 本地运行
 
-从 `backend/.env.example` 复制本地配置，设置异步数据库 URL、管理员 bcrypt 密码哈希、至少32字符的独立 JWT 签名密钥和嵌入服务。配置值只放环境或未跟踪的 `.env`，不能提交真实连接和凭据。
-
-```bash
-cd knowledge_base/backend
-uv sync --frozen --extra dev
-uv run python -m app.infrastructure.database
-uv run uvicorn app.main:app --reload --port 8100
-```
-
-Windows 环境创建时指定标准 Python 3.14 的绝对路径。Chroma 若无法打开本地数据库，可将 `KB_DATA_ROOT` 指向可写的短路径，避开带非 ASCII 字符的路径。开发可用 aiosqlite（需 dev extra）；生产必须是 `mysql+aiomysql`。`python -m app.infrastructure.database` 只初始化空库，不升级或删除已有业务数据库。
-
-```bash
-cd knowledge_base/frontend
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-界面开发端口5174，通过 Vite 将 `/api` 转发到本地8100端口；需要其他地址时使用未跟踪环境文件中的 `KB_API_TARGET`。界面只使用管理员登录令牌，不接触服务凭证。生产构建 `pnpm build`，将 `dist` 发布到独立静态站点，并将同站点 `/api` 反向代理至知识库后端；SPA回退到 `index.html`。保持与业务前端分站点，避免API路径冲突。
+按 [全容器部署说明](../deploy/README.md) 生成管理员凭据、初始化空库并启动知识库后端和管理站点。管理界面通过自己的站点访问同源 `/api`，登录使用知识库管理员令牌，服务凭证由后端持有。
 
 ## 身份与服务授权
 
@@ -36,13 +19,7 @@ pnpm dev
 
 真实服务凭证至少16字符，分别生成且不复用签名密钥。智法宝的普通查询与 Agent 共用 reader。业务兼容写入入口需要 writer 和业务管理员白名单；首次创建知识库使用独立管理员身份，之后将实际ID登记到服务授权与调用方默认库配置。其他应用必须使用不同凭证、应用ID和库白名单。
 
-bcrypt哈希可在安装依赖后用交互式密码输入生成：
-
-```bash
-uv run python -c "import bcrypt,getpass; print(bcrypt.hashpw(getpass.getpass('管理员密码: ').encode(),bcrypt.gensalt()).decode())"
-```
-
-`.env` 中含 `$` 的密码哈希用单引号包围。签名密钥和服务凭证可用 `python -c "import secrets; print(secrets.token_urlsafe(48))"` 分别生成。不要将密钥放入前端环境变量。
+密码哈希及签名密钥生成命令见 [部署说明](../deploy/README.md)。`.env` 中含 `$` 的密码哈希用单引号包围。用同一随机生成命令单独生成服务凭证，并在部署环境文件中配置。
 
 ## 语料入库
 
@@ -64,7 +41,7 @@ uv run python -c "import bcrypt,getpass; print(bcrypt.hashpw(getpass.getpass('�
 
 ### 已有库升级
 
-空库按本页原有建表流程初始化。已有库先审核两张新增关键词表的 MySQL DDL，使用有建表权限的维护连接执行升级。应用连接的运行权限沿用现有配置。
+空库按部署说明初始化。已有库先审核两张新增关键词表的 MySQL DDL，使用有建表权限的维护连接执行升级。应用连接的运行权限沿用现有配置。
 
 ```bash
 cd knowledge_base/backend

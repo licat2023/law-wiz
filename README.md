@@ -34,7 +34,7 @@
 - **电子签章（P3 规划）**：第三方电子签章服务（开发者版）承担可靠电子签名效力，平台负责编排与存证（见 [ADR-0005](docs/adr/0005-signature-provider-abstraction.md)）
 - **密码算法**：RSA-2048 + SHA-256 主链路，国密 SM 系列为后期扩展点（见 [ADR-0003](docs/adr/0003-crypto-rsa-first-sm-later.md)）
 - **数据存储**：MySQL 9.7、Redis、本地持久化卷、进程内 Chroma；MinIO 为后续规划
-- **部署运维**：Debian 13、Docker Compose、OpenResty（1Panel 自带，复用而不另起）；GitHub Actions 尚未配置，Prometheus/Grafana 与 ELK 为**后期可选**
+- **部署运维**：Debian 13、Docker Compose、Nginx、1Panel OpenResty。开发和生产的应用服务均由 Compose 启动，OpenResty 提供 HTTPS。GitHub Actions 尚未配置，Prometheus/Grafana 与 ELK 为**后期可选**。见 [部署说明](deploy/README.md)。
 
 > **合规边界**：本项目参照 GB/T 38540-2020 的安全目标进行设计，但**不构成对该标准的合规声明** —— 该标准的合规性依赖经商用密码产品认证的密码模块。可靠电子签名能力由具备资质的第三方签章服务提供。
 
@@ -66,6 +66,7 @@
 | [docs/04-数据库设计.md](docs/04-数据库设计.md) | 持久化边界与旧库 DDL 参考；当前建表以各服务 ORM 为准 |
 | [docs/05-接口设计.md](docs/05-接口设计.md) | 一期全部接口的完整契约、统一响应体与错误码、用户令牌鉴权、异步任务轮询规则、外部能力接入约定 |
 | [docs/06-MVP演示指南.md](docs/06-MVP演示指南.md) | P1 答辩演示顺序、架构说明、预期结果与已知边界 |
+| [deploy/README.md](deploy/README.md) | 开发及生产 Compose、空库初始化和站点配置 |
 | [docs/07-v0.3.0开发记录.md](docs/07-v0.3.0开发记录.md) | v0.3.0 发布时的实现与演进记录 |
 | [docs/FILE_MAP.md](docs/FILE_MAP.md) | 当前目录职责、施工范围与验收结果 |
 | [docs/adr/](docs/adr/) | 架构决策记录：不可逆决策及其被否决的替代方案 |

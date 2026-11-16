@@ -29,7 +29,7 @@
 
 各后端执行 `uv sync --frozen --extra dev`、`uv run --extra dev ruff check app` 和 `uv run --extra dev ruff format --check app`。各前端执行 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm run build`。
 
-空库初始化见 [业务后端](backend/README.md)、[知识库](knowledge_base/README.md) 和 [部署说明](deploy/README.md)。通过 [Demo 指南](docs/06-MVP演示指南.md) 核对入库、审查报告与问答引用。
+开发和生产启动、空库初始化及站点配置见 [部署说明](deploy/README.md)。构建两个站点时保持相对 `/api`，各前端容器连接自己的后端。通过 [Demo 指南](docs/06-MVP演示指南.md) 核对入库、审查报告与问答引用。
 
 从公开栏目采集法规、用 Docling 转换和修订入库时，见 [法规语料工具](tools/legal-corpus/README.md)。
 

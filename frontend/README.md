@@ -4,15 +4,7 @@ Vue 3 + Element Plus + Vite，一期承载 M2 合同智能审查与 M3 法律 AI
 
 ## 快速开始
 
-```powershell
-pnpm install
-pnpm dev        # http://localhost:5173
-```
-
-**开发环境不需要配置后端地址**：Vite 把 `/api` 代理到 `127.0.0.1:8000`，
-因此前后端同源，没有跨域问题。生产由 OpenResty 同源代理，行为一致。
-
-先起后端（见 [`../backend/README.md`](../backend/README.md)），否则登录会失败。
+按 [全容器部署说明](../deploy/README.md) 启动开发环境，业务界面默认使用 `http://127.0.0.1:5173`。Vite 在开发容器中运行，由 Compose Watch 同步源码。开发和生产都通过当前站点的 `/api` 访问业务后端。
 
 ## 目录结构
 
@@ -93,8 +85,7 @@ pnpm build         # 类型检查 + 构建到 dist/
 pnpm build:only    # 只构建，跳过类型检查（赶时间时用）
 ```
 
-产物 `dist/` 上传到服务器站点静态目录，由 1Panel 的 OpenResty 托管
-（见 [`../deploy/README.md`](../deploy/README.md)）。
+生产 Compose 在 `Dockerfile` 内构建并把 `dist/` 打包进 Nginx 镜像。
 
 ## 多端说明
 

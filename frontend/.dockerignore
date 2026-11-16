@@ -1,0 +1,10 @@
+# 宿主依赖、生成产物和本地配置不进入镜像。
+node_modules/
+dist/
+.data/
+.vscode/
+.env
+.env.*
+.npmrc
+*.local
+*.log

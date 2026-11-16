@@ -1,0 +1,15 @@
+# 开发阶段运行 Vite，生产阶段只发布构建后的业务站点。
+FROM node:24-bookworm-slim AS development
+RUN npm install --global pnpm@12.14.0
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+CMD ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--strictPort"]
+
+FROM development AS build
+RUN pnpm run build
+
+FROM nginx:1.30-alpine AS production
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY --from=build /app/dist/ /usr/share/nginx/html/

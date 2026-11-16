@@ -21,10 +21,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // 开发与生产都通过当前站点的 /api 访问业务后端。
+    // 浏览器始终使用同源 /api，开发容器通过服务名找到业务后端。
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: process.env.LAWWIZ_API_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

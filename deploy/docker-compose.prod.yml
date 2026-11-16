@@ -1,4 +1,4 @@
-# 部署两个后端及其数据依赖。两个站点的静态文件由各自站点服务发布。
+# 编排两个站点、对应后端及数据服务。公网 HTTPS 由现有 OpenResty 提供。
 name: lawwiz
 
 services:
@@ -72,7 +72,7 @@ services:
       LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY: ${LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY:-}
       LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID: ${LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID:?必须设置默认知识库ID}
       LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS: ${LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS:-[]}
-    # 宿主机反向代理通过回环地址转发业务 API。
+    # 保留宿主回环入口，供运维检查和已有工具使用。
     ports: ["127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"]
     volumes: [lawwiz-data:/app/.data]
     depends_on:
@@ -86,7 +86,7 @@ services:
       retries: 10
       start_period: 30s
     mem_limit: 640m
-    networks: [data, knowledge]
+    networks: [data, knowledge, business-web]
 
   knowledge-base:
     build: {context: ../knowledge_base/backend, dockerfile: Dockerfile}
@@ -130,7 +130,33 @@ services:
       start_period: 30s
     # 内嵌Chroma的候选预算；必须按真实语料和同机应用重新核算。
     mem_limit: 512m
-    networks: [data, knowledge]
+    networks: [data, knowledge, knowledge-web]
+
+  frontend:
+    build: {context: ../frontend, dockerfile: Dockerfile, target: production}
+    image: lawwiz-frontend:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:${LAWWIZ_FRONTEND_PORT:-8080}:80"]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck: &site-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 32m
+    networks: [business-web]
+
+  knowledge-base-frontend:
+    build: {context: ../knowledge_base/frontend, dockerfile: Dockerfile, target: production}
+    image: lawwiz-knowledge-base-frontend:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:${KB_FRONTEND_PORT:-8180}:80"]
+    depends_on:
+      knowledge-base: {condition: service_healthy}
+    healthcheck: *site-healthcheck
+    mem_limit: 32m
+    networks: [knowledge-web]
 
 volumes:
   lawwiz-mysql:
@@ -141,3 +167,5 @@ volumes:
 networks:
   data:
   knowledge:
+  business-web:
+  knowledge-web:

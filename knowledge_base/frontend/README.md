@@ -4,14 +4,9 @@
 
 ## 运行
 
-需要 Node.js 22 或更新版本及 pnpm。
+按 [全容器部署说明](../../deploy/README.md) 启动开发环境，管理界面默认使用 `http://127.0.0.1:5174`。Vite 在容器内代理同源 `/api`，Compose Watch 同步源码。生产由前端容器提供静态资源并代理知识库 API。
 
-```powershell
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-开发服务使用端口 5174，将 `/api` 转发到本机知识库后端。通过环境变量 `KB_API_TARGET` 指定开发代理目标；此变量只供 Vite 开发服务器使用，不包含在浏览器构建中。生产构建的 `/api` 由部署服务器转发到知识库后端。
+## 检查
 
 ```powershell
 pnpm run lint
