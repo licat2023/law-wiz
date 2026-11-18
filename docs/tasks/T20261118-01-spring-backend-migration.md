@@ -29,6 +29,7 @@
 | `ai-service/{ai_service/,tests/,pyproject.toml,uv.lock,Dockerfile,.dockerignore,README.md}` | 独立运行两个 Agent、检索并接入模型 | 新增及移动 | 已完成 | 4 项独立回归及 Docker 调用通过 |
 | `backend/app/{core/agent.py,core/citations.py,domains/contract_review/,domains/legal_qa/,infrastructure/{ai_service,knowledge_base,llm}.py,api/health.py,config.py,lifespan.py}`、`backend/{tests/,pyproject.toml,uv.lock,.env.example,README.md}` | 过渡业务流程通过 HTTP 调用 AI，保留权限、状态和数据 | 修改及移动 | 已完成 | 5 项回归和开发容器端到端通过 |
 | `backend-java/{pom.xml,Dockerfile,.dockerignore,.gitignore,README.md,src/main/java/,src/main/resources/,src/test/java/}` | Spring Boot、MyBatis、Redis、业务 HTTP、文档处理与对象存储 | 新增 | 施工中 | API 对照、实际 MySQL 与 Redis、文件样本与故障 |
+| `backend-java/src/{main,test}/java/com/lawwiz/business/files/` | 文件内容识别、上传去重、权限校验与 RustFS 对象读写 | 新增 | 已完成 | 实际 RustFS 上传和 SHA-256 校验通过，旧卷读取纳入审查联调 |
 | `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 施工中 | 空库与既有库、健康检查和容器预算 |
 | `deploy/` 迁移工具 | 旧文件清单、复制、哈希验证和切换回退 | 新增，路径待定 | 待施工 | 幂等迁移、缺失或损坏检测、回退可读取新增文件 |
 | `AGENTS.md`、`README.md`、`docs/{FILE_MAP.md,02-技术栈.md,03-概要设计.md,05-接口设计.md,06-MVP演示指南.md}`、`law-wiz.code-workspace` | 技术与部署入口、路径和接口说明 | 修改 | 待施工 | 对照最终目录和运行行为 |
@@ -41,4 +42,4 @@
 - AI 拆分阶段从暂存树导出干净源码。两个 Python 环境的 Ruff 检查、格式检查和共 9 项回归通过。隔离开发 Compose 构建并启动业务后端、独立 AI 服务及真实 MySQL、Redis、知识库，验证合同上传、审查成功、可下载 PDF、普通问答与报告追问。使用开发模型和空检索样本核对无依据行为，容器日志确认两类请求实际经过内部 HTTP。保留导出的 OpenAPI 及 13 表 MySQL DDL 用于 Java 对照。
 - Java 鉴权切片使用 Spring Boot 4.0.9、MyBatis Starter 4.0.1 和 Java 21。对同一隔离 MySQL 9.7 和 Redis，验证旧用户登录、旧 JWT 读取资料、旧刷新令牌在 Java 轮换、Python 识别 Java 新 JWT 和新密码哈希。重复邮箱返回 40902，资料更新和注销后旧刷新令牌失效通过。无符号用户编号 `9223372036854775815` 可通过 MyBatis、JWT 和 API 往返，JSON 保持字符串。
 - Java 问答容器通过实际 HTTP 调用独立 AI，验证重复提交复用消息、会话列表和归档、两轮风险项追问、跨用户拒绝以及旧后端读取 Java 写入的历史。用隔离库中的一条已索引法规样本验证 Java 保存真实检索命中的引用、旧后端读取同一引用。使用开发模型。
-- RustFS 1.0.5 独立容器验证了 S3 签名请求建桶及对象写入、读取和重启后字节一致。Java S3 客户端、业务文件及历史数据迁移仍待实施。
+- RustFS 1.0.5 独立容器验证了 S3 签名请求建桶及对象写入、读取和重启后字节一致。Java 容器通过实际 RustFS 上传合同，重复上传复用文件 ID，下载校验 SHA-256 与原件一致。历史数据迁移仍待实施。
