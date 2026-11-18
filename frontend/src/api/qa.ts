@@ -1,8 +1,7 @@
 /**
  * 法律 AI 问答接口（M3 的 E 组）。
  *
- * 后端由 `backend/app/domains/legal_qa/` 提供，函数签名与
- * docs/05-接口设计.md §5.6 的 E-01 ~ E-05 保持一致。
+ * 异步提交、助手消息流和会话历史的契约见 docs/05-接口设计.md §5.6。
  */
 
 import { api, http } from './client'
@@ -32,7 +31,7 @@ export function getSession(sessionId: string, params: { page?: number; page_size
  * 内容不同的回答，用户无法判断哪条有效。
  *
  * 返回 `assistant_message_id` 是**预分配**的，前端可用它先在界面占位，
- * 轮询到内容后按 ID 原地替换，避免消息顺序错乱。
+ * 订阅该消息的增量，收到正式结果后按 ID 原地替换。
  */
 export async function sendMessage(
   sessionId: string,
@@ -48,6 +47,61 @@ export async function sendMessage(
     user_message_id: string
     assistant_message_id: string
     status: string
+  }
+}
+
+/** 订阅已有助手消息。流结束后调用方通过会话详情读取正式结果。 */
+export async function streamAnswer(
+  sessionId: string,
+  assistantId: string,
+  signal: AbortSignal,
+  onDelta: (text: string) => void,
+) {
+  const response = await http.get<ReadableStream<Uint8Array>>(
+    `/qa/sessions/${sessionId}/messages/${assistantId}/stream`,
+    {
+      adapter: 'fetch',
+      responseType: 'stream',
+      headers: { Accept: 'text/event-stream, application/json' },
+      signal,
+      timeout: 0,
+    },
+  )
+  const body = response.data
+  const contentType = response.headers['content-type']
+  if (typeof contentType !== 'string' || !contentType.startsWith('text/event-stream')) {
+    await body.cancel()
+    throw new Error('问答流响应格式不合法')
+  }
+
+  const reader = body.pipeThrough(new TextDecoderStream()).getReader()
+  const separator = /\r?\n\r?\n/
+  let buffer = ''
+  try {
+    while (!signal.aborted) {
+      const next = await reader.read()
+      if (next.done) return
+      buffer += next.value
+      let boundary = separator.exec(buffer)
+      while (boundary) {
+        const lines = buffer.slice(0, boundary.index).split(/\r?\n/)
+        buffer = buffer.slice(boundary.index + boundary[0].length)
+        const event = lines
+          .find((line) => line.startsWith('event:'))
+          ?.slice(6)
+          .trim()
+        if (event === 'done') return
+        if (event === 'delta') {
+          const data = lines.find((line) => line.startsWith('data:'))?.slice(5)
+          const text = data ? JSON.parse(data).text : undefined
+          if (typeof text === 'string' && text) onDelta(text)
+        }
+        boundary = separator.exec(buffer)
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
 }
 

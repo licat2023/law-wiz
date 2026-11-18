@@ -2,18 +2,22 @@
 
 import logging
 import re
+from contextlib import aclosing
 from itertools import islice
 
 from pydantic import ValidationError
+from pydantic_core import from_json
 
 from ai_service.errors import InferenceError
-from ai_service.llm import DeepSeekInvocationError, invoke_chat
+from ai_service.llm import DeepSeekInvocationError, invoke_chat, stream_chat
 from ai_service.qa.prompts import LEGAL_QA_PROMPT, REPORT_FOLLOWUP_PROMPT
 from ai_service.qa.schemas import GroundedAnswer
-from ai_service.qa.state import LegalQaState
+from ai_service.qa.state import AnswerDelta, LegalQaState
 
 logger = logging.getLogger("lawwiz.qa")
 _EVIDENCE_MISSING = "未找到直接法律依据"
+_PREVIEW_MARKERS = re.compile(r"\[[0-9]+\]|\[[0-9]*$")
+_MAX_MODEL_OUTPUT = 160_000
 
 
 class LegalQaNodes:
@@ -66,7 +70,7 @@ class LegalQaNodes:
         messages = LEGAL_QA_PROMPT.format_messages(
             question=state["question"], sources=self._format(candidates)
         )
-        return await self._answer_from_model(messages, candidates)
+        return await self._answer_from_model(messages, candidates, emit=state.get("emit"))
 
     async def _generate_followup(self, state: LegalQaState) -> LegalQaState:
         report = state["report"]
@@ -91,9 +95,7 @@ class LegalQaNodes:
             question=state["question"],
             sources=self._format(candidates),
         )
-        result = await self._answer_from_model(messages, candidates)
-        result["answer"] = prefix + result["answer"]
-        return result
+        return await self._answer_from_model(messages, candidates, prefix=prefix, emit=state.get("emit"))
 
     @staticmethod
     def _format(candidates) -> str:
@@ -102,9 +104,15 @@ class LegalQaNodes:
             for i, citation in enumerate(candidates, start=1)
         )
 
-    async def _answer_from_model(self, messages, candidates) -> LegalQaState:
-        response = await invoke_chat(self._llm, messages)
-        content = response.content if isinstance(response.content, str) else ""
+    async def _answer_from_model(
+        self, messages, candidates, *, prefix: str = "", emit: AnswerDelta | None = None
+    ) -> LegalQaState:
+        if emit is None:
+            response = await invoke_chat(self._llm, messages)
+            content = response.content if isinstance(response.content, str) else ""
+            model_name = self._model_name(response)
+        else:
+            content, model_name = await self._stream_model(messages, prefix, emit)
         content = content.strip()
         if content.startswith("```json\n") and content.endswith("\n```"):
             content = content.removeprefix("```json\n").removesuffix("\n```")
@@ -127,10 +135,40 @@ class LegalQaNodes:
         text = re.sub(r"\[([0-9]+)\]", citation_label, text)
         if not cited:
             text = f"本轮{_EVIDENCE_MISSING}。\n{text}"
-        return {"answer": text, "sources": cited, "model_name": self._model_name(response)}
+        return {"answer": prefix + text, "sources": cited, "model_name": model_name}
 
-    def _model_name(self, response) -> str | None:
-        model_name = response.response_metadata.get("model_name")
+    async def _stream_model(self, messages, prefix: str, emit: AnswerDelta) -> tuple[str, str | None]:
+        content = ""
+        emitted = ""
+        model_name = None
+        async with aclosing(stream_chat(self._llm, messages)) as chunks:
+            async for chunk in chunks:
+                reported_model = chunk.response_metadata.get("model_name")
+                if isinstance(reported_model, str):
+                    model_name = reported_model
+                if not isinstance(chunk.content, str) or not chunk.content:
+                    continue
+                content += chunk.content
+                if len(content) > _MAX_MODEL_OUTPUT:
+                    raise DeepSeekInvocationError("模型返回的问答结果过长")
+                try:
+                    partial = from_json(
+                        content.lstrip().removeprefix("```json\n"), allow_partial="trailing-strings"
+                    )
+                except ValueError:
+                    continue
+                text = partial.get("answer") if isinstance(partial, dict) else None
+                if not isinstance(text, str):
+                    continue
+                # 引用编号等完整结构校验后再展示，避免预览中的编号和最终引文不一致。
+                text = _PREVIEW_MARKERS.sub("", text.lstrip()[:12000])
+                if text and text.startswith(emitted) and text != emitted:
+                    await emit((prefix if not emitted else "") + text[len(emitted) :])
+                    emitted = text
+        return content, model_name or self._model_name()
+
+    def _model_name(self, response=None) -> str | None:
+        model_name = response.response_metadata.get("model_name") if response is not None else None
         if not isinstance(model_name, str):
             model_name = getattr(self._llm, "model_name", None)
         return model_name if isinstance(model_name, str) else None

@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import com.lawwiz.business.api.ApiError;
@@ -19,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -42,6 +44,7 @@ class QaService {
     private final TransactionTemplate transactions;
     private final BackgroundTasks background;
     private final ObjectMapper json;
+    private final Map<BigInteger, QaAnswerStream> activeAnswers = new ConcurrentHashMap<>();
 
     QaService(QaMapper mapper, ReportContexts reports, InferenceClient inference,
               TransactionTemplate transactions, BackgroundTasks background, ObjectMapper json) {
@@ -130,10 +133,25 @@ class QaService {
         });
         BigInteger answerId = ApiValues.id(submission.assistantMessageId());
         BigInteger questionId = ApiValues.id(submission.userMessageId());
+        var stream = new QaAnswerStream();
+        activeAnswers.put(answerId, stream);
         background.submit(
-                () -> answer(owner, sessionId, questionId, answerId, question, requestId),
-                () -> failed(answerId, "回答生成失败：服务繁忙，请稍后重试"));
+                () -> answer(owner, sessionId, questionId, answerId, question, requestId, stream),
+                () -> {
+                    failed(answerId, "回答生成失败：服务繁忙，请稍后重试");
+                    finishStream(answerId, stream);
+                });
         return submission;
+    }
+
+    /** A subscription observes the existing background task; it cannot start a new turn. */
+    SseEmitter stream(BigInteger owner, BigInteger sessionId, BigInteger answerId) {
+        owned(owner, mapper.find(sessionId));
+        if (mapper.assistantMessage(sessionId, answerId) == null) {
+            throw new ApiError(40402, "问答消息不存在");
+        }
+        var stream = activeAnswers.get(answerId);
+        return stream == null ? QaAnswerStream.finishedSubscription() : stream.subscribe();
     }
 
     void archive(BigInteger owner, BigInteger id) {
@@ -144,7 +162,7 @@ class QaService {
     }
 
     private void answer(BigInteger owner, BigInteger sessionId, BigInteger questionId,
-                        BigInteger answerId, String question, String requestId) {
+                        BigInteger answerId, String question, String requestId, QaAnswerStream stream) {
         try {
             var session = owned(owner, mapper.find(sessionId));
             var report = reports.loadForAnswer(owner, session.reviewTaskId(), session.riskPointId());
@@ -157,13 +175,23 @@ class QaService {
                 payload.put("history", history);
             }
             long start = System.nanoTime();
-            JsonNode result = inference.qa(payload, requestId, "qa_" + answerId);
+            JsonNode result = inference.qa(payload, requestId, "qa_" + answerId, stream::append);
             store(answerId, result, (int) TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         } catch (ApiError error) {
             failed(answerId, "回答生成失败：" + error.getMessage());
         } catch (RuntimeException error) {
             LOGGER.warn("Could not answer message {} for request {}", answerId, requestId, error);
             failed(answerId, FAILURE);
+        } finally {
+            finishStream(answerId, stream);
+        }
+    }
+
+    private void finishStream(BigInteger answerId, QaAnswerStream stream) {
+        try {
+            stream.finish();
+        } finally {
+            activeAnswers.remove(answerId, stream);
         }
     }
 

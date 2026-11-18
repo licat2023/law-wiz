@@ -1,16 +1,18 @@
 """Expose structured review and QA to the business backend over internal HTTP."""
 
 import asyncio
+import json
+import logging
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from ai_service.agent import AgentContext
@@ -22,6 +24,8 @@ from ai_service.qa.agent import LegalQaAgent
 from ai_service.qa.schemas import LegalQaInput, LegalQaResult
 from ai_service.review.agent import ContractReviewAgent
 from ai_service.review.schemas import ContractReviewInput, ContractReviewResult
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, *, search_laws=None, model=None) -> FastAPI:
@@ -102,5 +106,41 @@ def create_app(settings: Settings | None = None, *, search_laws=None, model=None
     @app.post("/internal/qa")
     async def qa(payload: LegalQaInput, context: Annotated[AgentContext, Depends(context)]) -> LegalQaResult:
         return await invoke(lambda: app.state.qa.invoke(payload, context))
+
+    @app.post("/internal/qa/stream")
+    async def qa_stream(payload: LegalQaInput, context: Annotated[AgentContext, Depends(context)]):
+        async def events():
+            queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
+
+            async def emit(text: str) -> None:
+                await queue.put({"type": "delta", "text": text})
+
+            async def generate() -> None:
+                try:
+                    result = await invoke(lambda: app.state.qa.invoke(payload, context, emit=emit))
+                    await queue.put({"type": "result", "result": result.model_dump(mode="json")})
+                except InferenceError as exc:
+                    await queue.put({"type": "error", "code": exc.code, "message": str(exc)})
+                except Exception as exc:
+                    logger.error(
+                        "QA stream failed, request_id=%s: %s", context.request_id, type(exc).__name__
+                    )
+                    await queue.put(
+                        {"type": "error", "code": "model_unavailable", "message": "AI 服务暂不可用"}
+                    )
+
+            producer = asyncio.create_task(generate())
+            try:
+                while True:
+                    event = await queue.get()
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+                    if event["type"] != "delta":
+                        break
+            finally:
+                producer.cancel()
+                with suppress(asyncio.CancelledError):
+                    await producer
+
+        return StreamingResponse(events(), media_type="application/x-ndjson")
 
     return app

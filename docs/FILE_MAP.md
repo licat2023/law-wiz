@@ -15,6 +15,7 @@
 | `ai-service/ai_service/` | AI 服务入口、模型接入、法条引用检索、审查及问答工作流 |
 | `ai-service/tests/` | 内部推理接口与引用行为验证 |
 | `backend-java/` | 默认 Spring Boot 业务后端、MyBatis 映射、RustFS 访问和迁移命令 |
+| `backend-java/src/main/java/com/lawwiz/business/qa/` | 问答会话、回答与引文持久化，以及 `QaAnswerStream.java` 的生成中正文发布 |
 | `knowledge_base/backend/app/knowledge_bases/` | 库设置与访问范围 |
 | `knowledge_base/backend/app/documents/` | 文档、原文件、修订、解析与导入 |
 | `knowledge_base/backend/app/indexing/` | 切分、嵌入、关键词倒排、处理任务与索引发布 |

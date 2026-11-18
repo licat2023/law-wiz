@@ -14,6 +14,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** Serve ordinary and report-associated conversations under the existing QA API. */
 @RestController
@@ -88,6 +91,15 @@ class QaController {
         var result = idempotency.submit("qa:" + owner + ":" + session, request.getHeader("Idempotency-Key"),
                 () -> qa.ask(owner, session, payload.content(), RequestIds.get(request)));
         return ApiEnvelope.success(result, request);
+    }
+
+    @GetMapping("/{id}/messages/{messageId}/stream")
+    ResponseEntity<SseEmitter> stream(@PathVariable String id, @PathVariable String messageId,
+                                      HttpServletRequest request, HttpServletResponse response) {
+        var owner = authorize(request, response, "poll", pollLimit);
+        var stream = qa.stream(owner, ApiValues.id(id), ApiValues.id(messageId));
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+                .header("Cache-Control", "no-store").header("X-Accel-Buffering", "no").body(stream);
     }
 
     @DeleteMapping("/{id}")

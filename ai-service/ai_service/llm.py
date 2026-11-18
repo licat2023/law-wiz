@@ -1,6 +1,7 @@
 """显式配置的 OpenAI-compatible LangChain 模型接入。"""
 
 import logging
+from contextlib import aclosing
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -31,4 +32,15 @@ async def invoke_chat(model, payload):
         return await model.ainvoke(payload)
     except Exception as exc:
         logger.warning("Model invocation failed: %s", type(exc).__name__)
+        raise DeepSeekInvocationError("模型服务暂不可用") from exc
+
+
+async def stream_chat(model, payload):
+    """Yield model chunks and close the upstream stream on cancellation."""
+    try:
+        async with aclosing(model.astream(payload)) as chunks:
+            async for chunk in chunks:
+                yield chunk
+    except Exception as exc:
+        logger.warning("Model stream failed: %s", type(exc).__name__)
         raise DeepSeekInvocationError("模型服务暂不可用") from exc

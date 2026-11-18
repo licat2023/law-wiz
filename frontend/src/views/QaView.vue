@@ -3,13 +3,11 @@
  * 法律问答页（M3）。
  *
  * 对接口契约的实现约束（docs/05-接口设计.md §5.6 / §6.2）：
- * 1. 提问是异步的：E-04 返回**预分配**的 assistant_message_id，先用它在界面
- *    占位（"正在思考…"），轮询 E-03 拿到内容后**按 ID 原地替换**；
+ * 1. E-04 预分配助手消息 ID，E-06 发布临时正文，E-03 提供保存后的回答和引文；
  * 2. 必须携带 Idempotency-Key；失败不自动重试（§6.2），用户重新发起
  *    即新的操作、用新的键；
  * 3. has_citation === false 时必须显式提示"未找到直接法律依据，仅供参考"；
- * 4. 轮询间隔递增 1s→2s→3s→5s，上限 90 秒，同一页面最多 1 个轮询循环
- *    （等待回答期间禁止再次提问与切换会话）。
+ * 4. 订阅中断时用 E-03 取回结果，等待回答期间同一页面只处理一条问答。
  */
 import { Loading } from '@element-plus/icons-vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -23,6 +21,7 @@ import {
   listSessions,
   newIdempotencyKey,
   sendMessage,
+  streamAnswer,
 } from '@/api/qa'
 import { listReviews } from '@/api/review'
 import type { QaMessage, QaSession, ReviewListItem } from '@/api/types'
@@ -33,6 +32,8 @@ const MESSAGE_PAGE_SIZE = 50
 const REPORT_PAGE_SIZE = 100
 
 interface DisplayMessage extends QaMessage {
+  /** 等待最终校验和保存时收到的正文。 */
+  partial?: string
   /** 轮询超时占位，不算"未找到依据" */
   timedOut?: boolean
 }
@@ -68,12 +69,14 @@ const reportOptions = computed(() => {
 const msgListRef = ref<HTMLElement>()
 
 let disposed = false
+let answerStreamController: AbortController | undefined
 onUnmounted(() => {
   disposed = true
+  answerStreamController?.abort()
 })
 
 watch(
-  () => messages.value.length,
+  () => [messages.value.length, messages.value.at(-1)?.partial, messages.value.at(-1)?.content],
   async () => {
     await nextTick()
     const el = msgListRef.value
@@ -85,17 +88,15 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-/** 轮询 E-03，直到该 assistant 消息有内容或 90 秒超时 */
+/** 读取已保存的结果。订阅结束或断开后首次立即读取，未完成时递增等待。 */
 async function waitForAnswer(
   sessionId: string,
   assistantId: string,
   page: number,
+  deadline: number,
 ): Promise<QaMessage | null> {
-  const deadline = Date.now() + POLL_TIMEOUT
   let idx = 0
-  while (!disposed && Date.now() < deadline) {
-    await sleep(POLL_INTERVALS[idx])
-    idx = Math.min(idx + 1, POLL_INTERVALS.length - 1)
+  while (!disposed) {
     try {
       const detail = await getSession(sessionId, { page, page_size: MESSAGE_PAGE_SIZE })
       const msg = detail.messages.items.find((m) => m.message_id === assistantId)
@@ -104,17 +105,37 @@ async function waitForAnswer(
     } catch {
       // 网络抖动继续轮询
     }
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
+    await sleep(Math.min(POLL_INTERVALS[idx], remaining))
+    idx = Math.min(idx + 1, POLL_INTERVALS.length - 1)
   }
   return null
 }
 
 async function settleAnswer(sessionId: string, placeholder: DisplayMessage, page: number) {
-  const answer = await waitForAnswer(sessionId, placeholder.message_id, page)
+  const controller = new AbortController()
+  answerStreamController = controller
+  const deadline = Date.now() + POLL_TIMEOUT
+  const timer = window.setTimeout(() => controller.abort(), POLL_TIMEOUT)
+  try {
+    await streamAnswer(sessionId, placeholder.message_id, controller.signal, (text) => {
+      const message = messages.value.find((item) => item.message_id === placeholder.message_id)
+      if (!disposed && message) message.partial = (message.partial ?? '') + text
+    })
+  } catch {
+    // 断线或旧后端仍可从会话详情取得同一回答。
+  } finally {
+    window.clearTimeout(timer)
+    answerStreamController = undefined
+  }
+  const answer = await waitForAnswer(sessionId, placeholder.message_id, page, deadline)
   if (disposed) return
   const idx = messages.value.findIndex((m) => m.message_id === placeholder.message_id)
   if (idx < 0) return
   messages.value[idx] = answer ?? {
     ...placeholder,
+    partial: undefined,
     content: '（回答耗时较长，请稍后重新打开会话查看）',
     timedOut: true,
   }
@@ -371,10 +392,11 @@ onMounted(async () => {
             加载更早消息
           </el-button>
           <div v-for="m in messages" :key="m.message_id" class="msg-row" :class="m.role">
-            <div class="bubble">
+            <div class="bubble" :aria-busy="m.role === 'assistant' && !m.content">
               <template v-if="m.role === 'assistant' && !m.content">
-                <span class="thinking">正在思考</span>
-                <el-icon class="is-loading"><Loading /></el-icon>
+                <span v-if="m.partial" class="answer-preview">{{ m.partial }}</span>
+                <span v-else class="thinking">正在生成回答</span>
+                <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
               </template>
               <template v-else>{{ m.content }}</template>
 

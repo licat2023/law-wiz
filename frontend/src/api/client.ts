@@ -147,10 +147,14 @@ async function refreshAccessToken(): Promise<boolean> {
   }
 }
 
-function toApiError(error: AxiosError<ApiResponse<unknown>>): ApiError {
+async function toApiError(error: AxiosError<ApiResponse<unknown>>): Promise<ApiError> {
   const resp = error.response
-  if (resp?.data && typeof resp.data === 'object' && 'code' in resp.data) {
-    const body = resp.data
+  let body = resp?.data
+  if (body instanceof ReadableStream) {
+    // 流式接口的鉴权失败也沿用业务响应体，让刷新令牌逻辑照常生效。
+    body = await new Response(body).json().catch(() => undefined)
+  }
+  if (resp && body && typeof body === 'object' && 'code' in body) {
     const details = (body.data as ErrorDetails | null)?.details
     return new ApiError({
       code: body.code,
@@ -174,7 +178,7 @@ function toApiError(error: AxiosError<ApiResponse<unknown>>): ApiError {
 http.interceptors.response.use(
   (resp) => resp,
   async (error: AxiosError<ApiResponse<unknown>>) => {
-    const apiError = toApiError(error)
+    const apiError = await toApiError(error)
     const original = error.config as (AxiosRequestConfig & { _retried?: boolean }) | undefined
 
     // 访问令牌失效 → 刷新一次并重放；已重放过则不再重试

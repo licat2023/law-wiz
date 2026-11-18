@@ -61,6 +61,9 @@ interface QaMapper {
     @Select("SELECT " + MESSAGES + " FROM qa_message WHERE qa_session_id = #{id} ORDER BY id LIMIT #{size} OFFSET #{offset}")
     List<Message> messages(BigInteger id, int size, long offset);
 
+    @Select("SELECT id FROM qa_message WHERE qa_session_id = #{session} AND id = #{id} AND `role` = 'assistant'")
+    BigInteger assistantMessage(BigInteger session, BigInteger id);
+
     @Select("""
             <script>
             SELECT qa_message_id,

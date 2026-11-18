@@ -4,7 +4,7 @@ import json
 import unittest
 
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from ai_service.citations import Citation
 from ai_service.config import Settings
@@ -164,3 +164,61 @@ class InferenceTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("知识库暂不可用", response.json()["answer"])
         self.assertEqual(response.json()["citations"], [])
+
+    def test_qa_stream_delivers_only_answer_text_then_validated_citations(self):
+        class ChunkedModel:
+            async def astream(self, _messages):
+                yield AIMessageChunk(content="", additional_kwargs={"reasoning_content": "内部推理"})
+                for content in (
+                    '```json\n{"answer":"核对',
+                    r"合同\n签收 [",
+                    "2]",
+                    '记录","citations":[2]}\n```',
+                ):
+                    yield AIMessageChunk(content=content, response_metadata={"model_name": "fixture-stream"})
+
+        async def search(_query, **_context):
+            return [
+                Citation(document_id="one", knowledge_base_chunk_id="one", quoted_text="候选法条"),
+                Citation(document_id="two", knowledge_base_chunk_id="two", quoted_text="使用的法条"),
+            ]
+
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=ChunkedModel())
+        with TestClient(app) as client:
+            path = "/internal/qa/stream"
+            self.assertEqual(client.post(path, json={"question": "如何签收？"}).status_code, 401)
+            for report in (None, {"contract_title": "合同", "summary": "测试摘要"}):
+                with self.subTest(report=report):
+                    response = client.post(
+                        path, headers=self.headers, json={"question": "如何签收？", "report": report}
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    events = [json.loads(line) for line in response.iter_lines()]
+                    deltas, final = events[:-1], events[-1]
+                    self.assertGreater(len(deltas), 1)
+                    self.assertTrue(all(event["type"] == "delta" for event in deltas))
+                    preview = "".join(event["text"] for event in deltas)
+                    prefix = "报告原有分析\n测试摘要\n\n本轮依据与建议\n" if report else ""
+                    self.assertEqual(preview, prefix + "核对合同\n签收 记录")
+                    self.assertEqual(final["type"], "result")
+                    self.assertEqual(final["result"]["answer"], prefix + "核对合同\n签收 [1]记录")
+                    self.assertEqual(final["result"]["model_name"], "fixture-stream")
+                    self.assertEqual([item["document_id"] for item in final["result"]["citations"]], ["two"])
+
+    def test_qa_stream_never_promotes_a_truncated_model_response(self):
+        class TruncatedModel:
+            async def astream(self, _messages):
+                yield AIMessageChunk(content='{"answer":"未完成')
+
+        async def search(_query, **_context):
+            return []
+
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=TruncatedModel())
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/qa/stream", headers=self.headers, json={"question": "如何签收？"}
+            )
+        self.assertEqual(response.status_code, 200)
+        events = [json.loads(line) for line in response.iter_lines()]
+        self.assertEqual([event["type"] for event in events], ["delta", "error"])
+        self.assertEqual(events[-1]["code"], "model_unavailable")
