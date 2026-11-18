@@ -1,6 +1,6 @@
 # 独立知识库
 
-`backend` 独立持有文档、修订、分块、任务、原文件和内嵌 Chroma；`frontend` 是独立 Vue 管理界面。业务后端及其中的 Agent 通过同一个 HTTP 客户端检索。知识库拥有独立数据库、原文件卷与 Chroma 目录。
+`backend` 独立持有文档、修订、分块、任务、原文件和内嵌 Chroma；`frontend` 是独立 Vue 管理界面。业务后端转发兼容接口，独立 AI 服务通过 HTTP 检索。知识库拥有独立数据库、原文件卷与 Chroma 目录。
 
 ## 本地运行
 

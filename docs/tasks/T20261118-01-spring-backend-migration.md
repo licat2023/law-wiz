@@ -5,6 +5,7 @@
 - R1，本次聊天，用户要求“规划计划拆AI并将后端转为SpringBoot+Mybatis+Redsi+RustFS”。
 - R2，本次聊天，用户设置执行目标“拆AI并将后端转为SpringBoot+Mybatis+Redsi+RustFS”。采用此前对话中的 AI 拆分、Java 接管、RustFS 切换和本地回退演练顺序。
 - R3，本次聊天，用户对遗留改动的处理选择“进行提交然后在当前工作区开展工作”。已在现有分支分别提交文档纠正、编辑器配置、历史 AI 方案和架构调研。迁移以其后的干净 HEAD `f06f890` 为基线。
+- R4，本次聊天，用户要求“继续完成上一轮因 usage limit 中断的任务。先检查当前工作区状态，避免重复执行已经完成的修改或命令，然后从未完成步骤继续。保留原有任务范围，不要停下来等人确认。”继续使用当前工作区，并按最新 Docker 文件交换约定验收。
 
 ## 当前任务理解
 
@@ -28,18 +29,24 @@
 | --- | --- | --- | --- | --- |
 | `ai-service/{ai_service/,tests/,pyproject.toml,uv.lock,Dockerfile,.dockerignore,README.md}` | 独立运行两个 Agent、检索并接入模型 | 新增及移动 | 已完成 | 4 项独立回归及 Docker 调用通过 |
 | `backend/app/{core/agent.py,core/citations.py,domains/contract_review/,domains/legal_qa/,infrastructure/{ai_service,knowledge_base,llm}.py,api/health.py,config.py,lifespan.py}`、`backend/{tests/,pyproject.toml,uv.lock,.env.example,README.md}` | 过渡业务流程通过 HTTP 调用 AI，保留权限、状态和数据 | 修改及移动 | 已完成 | 5 项回归和开发容器端到端通过 |
-| `backend-java/{pom.xml,Dockerfile,.dockerignore,.gitignore,README.md,src/main/java/,src/main/resources/,src/test/java/}` | Spring Boot、MyBatis、Redis、业务 HTTP、文档处理与对象存储 | 新增 | 施工中 | API 对照、实际 MySQL 与 Redis、文件样本与故障 |
-| `backend-java/src/{main,test}/java/com/lawwiz/business/files/` | 文件内容识别、上传去重、权限校验与 RustFS 对象读写 | 新增 | 已完成 | 实际 RustFS 上传和 SHA-256 校验通过，旧卷读取纳入审查联调 |
-| `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 施工中 | 空库与既有库、健康检查和容器预算 |
-| `deploy/` 迁移工具 | 旧文件清单、复制、哈希验证和切换回退 | 新增，路径待定 | 待施工 | 幂等迁移、缺失或损坏检测、回退可读取新增文件 |
-| `AGENTS.md`、`README.md`、`docs/{FILE_MAP.md,02-技术栈.md,03-概要设计.md,05-接口设计.md,06-MVP演示指南.md}`、`law-wiz.code-workspace` | 技术与部署入口、路径和接口说明 | 修改 | 待施工 | 对照最终目录和运行行为 |
-| `docs/tasks/{README.md,T20261118-01-spring-backend-migration.md}` | 跟踪需求、状态和验收依据 | 修改及新增 | 施工中 | 链接、状态和实际验证一致 |
+| `backend-java/{pom.xml,Dockerfile,.dockerignore,.gitignore,README.md,src/main/java/,src/main/resources/,src/test/java/}` | Spring Boot、MyBatis、Redis、业务 HTTP、文档处理与对象存储 | 新增 | 已完成 | 干净源码构建，5 项 Java 测试和 25 个 API 路径及方法对照通过 |
+| `backend-java/src/{main,test}/java/com/lawwiz/business/files/` | 文件内容识别、流式上传、去重、权限校验与 RustFS 对象读写 | 新增 | 已完成 | 实际 RustFS 两份 19 MiB 并发上传、去重及读回哈希验证通过 |
+| `backend-java/src/{main,test}/java/com/lawwiz/business/review/`、`backend-java/{pom.xml,Dockerfile}` | 审查任务、正文提取、生成中文 PDF 和保存报告 | 新增及修改 | 已完成 | DOCX 顺序、长文审查、中文 PDF、风险及模型故障回填通过 |
+| `backend-java/src/main/java/com/lawwiz/business/knowledge/` | 转发已有知识库兼容 API，保持读写权限与响应字段 | 新增 | 已完成 | 独立知识库授权写入、索引、读回、检索和拒绝无权写入通过 |
+| `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 已完成 | 开发栈就绪，生产编排用隔离模型和嵌入端点接通 |
+| `backend-java/src/main/java/com/lawwiz/business/files/FileMigration.java`、`deploy/mysql-init/{Dockerfile,10-business-schema.sql}` | 历史对象复制、哈希校验、回退和以镜像初始化空库 | 新增 | 已完成 | 空业务库 13 张表，缺件拒绝、重复复制及两版下载对照通过 |
+| `knowledge_base/backend/Dockerfile` | 将已有索引升级脚本随镜像交付 | 修改 | 已完成 | 从容器输出关键词表升级 DDL |
+| `AGENTS.md`、`README.md`、`backend/README.md`、`knowledge_base/README.md`、`docs/{FILE_MAP.md,02-技术栈.md,03-概要设计.md,04-数据库设计.md,05-接口设计.md,06-MVP演示指南.md}`、`law-wiz.code-workspace` | 技术与部署入口、路径、文件定位、备份和接口说明 | 修改 | 已完成 | 按最终目录、初始化行为与回退命令核对 |
+| `docs/tasks/{README.md,T20261118-01-spring-backend-migration.md}` | 跟踪需求、状态和验收依据 | 修改及新增 | 已完成 | 链接、状态和实际验证一致 |
 
 ## 验证结果与未解决事项
 
-- 当前分支无合并、变基或暂存遗留。业务报告追问的 5 项基线测试通过，知识库现有 Ruff 检查通过。
-- 本机 Docker 可用，已有 MySQL 9.7、Redis、Java 21 Maven 构建镜像及 RustFS 1.0.5 镜像。端到端、真实模型和主机并发内存仍待验证。
+- 业务报告追问的 5 项基线测试与知识库 Ruff 检查通过。
 - AI 拆分阶段从暂存树导出干净源码。两个 Python 环境的 Ruff 检查、格式检查和共 9 项回归通过。隔离开发 Compose 构建并启动业务后端、独立 AI 服务及真实 MySQL、Redis、知识库，验证合同上传、审查成功、可下载 PDF、普通问答与报告追问。使用开发模型和空检索样本核对无依据行为，容器日志确认两类请求实际经过内部 HTTP。保留导出的 OpenAPI 及 13 表 MySQL DDL 用于 Java 对照。
 - Java 鉴权切片使用 Spring Boot 4.0.9、MyBatis Starter 4.0.1 和 Java 21。对同一隔离 MySQL 9.7 和 Redis，验证旧用户登录、旧 JWT 读取资料、旧刷新令牌在 Java 轮换、Python 识别 Java 新 JWT 和新密码哈希。重复邮箱返回 40902，资料更新和注销后旧刷新令牌失效通过。无符号用户编号 `9223372036854775815` 可通过 MyBatis、JWT 和 API 往返，JSON 保持字符串。
 - Java 问答容器通过实际 HTTP 调用独立 AI，验证重复提交复用消息、会话列表和归档、两轮风险项追问、跨用户拒绝以及旧后端读取 Java 写入的历史。用隔离库中的一条已索引法规样本验证 Java 保存真实检索命中的引用、旧后端读取同一引用。使用开发模型。
-- RustFS 1.0.5 独立容器验证了 S3 签名请求建桶及对象写入、读取和重启后字节一致。Java 容器通过实际 RustFS 上传合同，重复上传复用文件 ID，下载校验 SHA-256 与原件一致。历史数据迁移仍待实施。
+- RustFS 1.0.5 验证建桶、对象读写和重启持久化。Java 以临时文件流式上传，两份 19 MiB 合同并发成功，重复上传复用文件 ID，从实际对象存储读回校验通过。负载完成时，Java 容器观测值从 383.3 MiB 降至 256 MiB，两轮均无 OOM 或重启。该数据是本机样本观测，未测目标主机生产并发。
+- Java 审查读取 RustFS 合同并生成中文 PDF。实际 MySQL 验证风险规则、报告计数和误报标记。系统存下 24 万字符合同正文，在 AI 输入上限内成功生成审查结果。知识库兼容入口实测授权写入、索引、分块及检索，未授权写入返回 40301。
+- 从 Git 暂存树导出干净源码构建。开发和隔离生产编排均启动，两个站点代理通过，前端生产构建和两套 ESLint、5 项 Java 回归通过。OpenAPI 对照 20 个路径共 25 个 HTTP 操作，路径参数名称按占位符核对。开发文档可打开，生产文档和固定验证码均关闭。健康检查的 `runtime` 提供 `java_version` 和启动时间，Java OpenAPI 中的响应 `data` 为通用类型。开发使用模型替身，生产编排连接本地协议替身，验证实际 HTTP 交互和模型 503 经服务转换后持久化为 `failed`/`50301`。
+- 隔离已有库共校验 13 个对象，覆盖旧卷与 RustFS 混合数据、缺件拒绝、复制重试和全部回退。缺件时数据库定位保持不变。生产编排按文档回退 3 个对象后，旧版 Python 登录并下载 Java 新生成的 PDF，字节与回退前相同。复制回 RustFS 后，Java 再次下载得到相同文件。
+- 验收环境使用脱敏数据和本地替身。实际生产切换、真实生成与嵌入供应商、目标主机并发资源容量留待上线时验证。

@@ -1,6 +1,6 @@
 # 部署说明
 
-开发和生产通过 Docker Compose 运行两个站点、两个应用后端、AI 服务、MySQL 和 Redis。两个站点分别代理同源 `/api`。AI 服务调用生成模型并检索法条，知识库调用嵌入服务。
+开发和生产通过 Docker Compose 运行两个站点、Spring Boot 业务后端、知识库后端、AI 服务、MySQL、Redis 和 RustFS。两个站点分别代理同源 `/api`。业务合同和报告存入 RustFS，AI 服务调用生成模型并检索法条，知识库调用嵌入服务。
 
 ## 本地 Demo
 
@@ -12,12 +12,11 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml run --rm --no-deps 
 docker compose --env-file .env.dev -f docker-compose.dev.yml run --rm --no-deps knowledge-base python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-将输出分别填入 `KB_ADMIN_PASSWORD_HASH` 和 `KB_JWT_SECRET`。密码哈希用单引号包围。先启动数据服务，只为两个空库执行各自的建表命令，再启动管理站点。
+将输出分别填入 `KB_ADMIN_PASSWORD_HASH` 和 `KB_JWT_SECRET`。密码哈希用单引号包围。MySQL 首次启动创建业务表。初始化空知识库后启动管理站点。
 
 ```bash
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --wait mysql redis
 docker compose --env-file .env.dev -f docker-compose.dev.yml run --rm --no-deps knowledge-base python -m app.infrastructure.database
-docker compose --env-file .env.dev -f docker-compose.dev.yml run --rm --no-deps backend python -m app.infrastructure.database.bootstrap
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --wait knowledge-base-frontend
 ```
 
@@ -42,27 +41,47 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml watch --no-up
 首次部署可先启动知识库，再由管理员创建默认库。首次为知识库建表时可用空的服务凭证映射 `{}`。有实际库 ID 后设置默认库 ID 和 reader 映射，再启用业务后端。Compose 在解析完整配置时会校验必填变量，先填齐 `.env.example` 的必填项；只启动知识库时可临时给默认库 ID 填待初始化值。
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --wait mysql redis
 docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d --wait mysql redis
 docker compose -f docker-compose.prod.yml run --rm --no-deps knowledge-base python -m app.infrastructure.database
 docker compose -f docker-compose.prod.yml up -d --wait knowledge-base-frontend
 # 按下文接通管理站点。创建默认库并填写授权后，用 up 应用新配置。
 docker compose -f docker-compose.prod.yml up -d --wait knowledge-base
-docker compose -f docker-compose.prod.yml run --rm --no-deps backend python -m app.infrastructure.database.bootstrap
 docker compose -f docker-compose.prod.yml up -d --wait
 ```
 
-MySQL 首次启动通过 `mysql-init/20-knowledge-base.sh` 创建独立知识库及账号。已有卷跳过镜像初始化脚本。业务文件卷为 `lawwiz-data`，知识库原文件和 Chroma 位于 `lawwiz-kb-data`，数据库位于 `lawwiz-mysql`。
+MySQL 镜像以 `mysql:9.7` 为底镜像并内置初始化脚本。首次启动创建业务表和独立知识库账号，已有数据库卷跳过初始化。新业务文件使用 `lawwiz-rustfs`。原业务文件保留在 `lawwiz-data`，知识库原文件和 Chroma 位于 `lawwiz-kb-data`，关系库位于 `lawwiz-mysql`。
 
 已有数据库升级时，先按业务后端说明审核并执行报告追问迁移 SQL，再按知识库说明创建关键词表。知识库构建成功后，可以在本目录用一次性容器访问内部数据库，先以 `--schema-sql` 审核，再以 `--create-tables` 应用结构变更。知识库启动后用同一命令入口和 `--knowledge-base <库ID>` 分批排入重建任务。[业务后端说明](../backend/README.md) · [知识库升级](../knowledge_base/README.md#已有库升级)
 
 ```bash
-docker compose -f docker-compose.prod.yml run --rm --no-deps \
-  -v ../knowledge_base/backend/scripts:/app/scripts:ro knowledge-base \
+docker compose -f docker-compose.prod.yml run --rm --no-deps knowledge-base \
   python -m scripts.rebuild_keyword_index --schema-sql
 ```
 
 Compose 默认启用混合检索。可通过部署 `.env` 的 `KB_RETRIEVAL_STRATEGY` 选择向量、混合或重排。重排服务按目标环境的资源预算独立部署，完整端点和调用限制通过 `KB_RERANK_*` 配置。
+
+## 迁移或回退业务文件
+
+在同一 Compose 项目保留 MySQL 与旧业务文件卷。备份数据库和旧文件，保存旧版 Compose 配置、环境和业务镜像标签。暂停上传及新审查，等待在途业务任务结束后停止业务容器。核对旧卷可读，配置 RustFS 凭据并启动数据服务。迁移命令按文件记录读取，逐个核对大小和 SHA-256，复制后重新读取校验。全部验证通过才更新数据库定位。命令逐条输出 JSON 结果，最后报告验证与切换数量，可保存日志用于比对。
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --wait mysql redis rustfs
+docker compose -f docker-compose.prod.yml stop backend
+docker compose -f docker-compose.prod.yml run --rm --no-deps backend --lawwiz.file-migration=check
+docker compose -f docker-compose.prod.yml run --rm --no-deps backend --lawwiz.file-migration=copy
+docker compose -f docker-compose.prod.yml up -d --wait
+```
+
+回退前同样暂停写入并停业务容器。以下命令以旧业务服务的用户身份挂载可写旧文件卷，将 RustFS 文件回补到旧路径并核对后更新数据库定位。用实际 Compose 项目名对应的旧卷替换例子中的卷名。定位都回到 `local` 后，才切回旧业务镜像。两份对象数据保留至回退窗口结束。
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm --no-deps \
+  -e LAWWIZ_STORAGE_LOCAL_ROOT=/app/.rollback \
+  -v lawwiz_lawwiz-data:/app/.rollback:rw backend --lawwiz.file-migration=rollback
+```
+
+让保存的旧版编排引用备份的 Python 镜像标签，沿用原来的 Compose 项目名，再用 `up -d --no-deps --no-build --pull never --wait backend` 只切回业务后端。通过业务站点核对登录、旧报告和回退前新增的报告均可读取。
 
 ## 站点与健康检查
 
@@ -88,8 +107,9 @@ OpenResty 的站点代理须传递原始 `Host`，用 `$remote_addr` 设置 `X-F
 | Redis | 96 MiB |
 | 业务后端 | 384 MiB |
 | AI 服务 | 256 MiB |
+| RustFS | 256 MiB |
 | 知识库（单 worker） | 512 MiB |
 | 业务前端 | 32 MiB |
 | 知识库管理前端 | 32 MiB |
 
-业务后端和 AI 服务沿用拆分前的合计预算。部署到共享主机前，以真实语料、模型和并发请求核对实际内存占用。
+部署到共享主机前，以真实语料、模型和并发请求核对 Java、AI 与 RustFS 的实际内存占用。

@@ -9,9 +9,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /** Render framework and business failures with the same public envelope. */
@@ -52,6 +55,12 @@ public class ApiErrors {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ApiEnvelope> fileTooLarge(MaxUploadSizeExceededException error, HttpServletRequest request) {
         return business(new ApiError(41301, "文件超出大小上限"), request);
+    }
+
+    @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class,
+            MethodArgumentTypeMismatchException.class})
+    ResponseEntity<ApiEnvelope> parameter(Exception error, HttpServletRequest request) {
+        return business(new ApiError(40001, "请求参数不合法"), request);
     }
 
     @ExceptionHandler(Exception.class)

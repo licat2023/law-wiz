@@ -13,6 +13,7 @@ RUN python -c "import sys, sysconfig; assert sys.version_info[:2] == (3, 14), sy
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
+COPY scripts ./scripts
 RUN uv sync --frozen --no-dev
 RUN groupadd --system app && useradd --system --gid app --home /app app \
     && mkdir -p /app/.data && chown -R app:app /app

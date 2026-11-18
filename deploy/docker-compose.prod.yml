@@ -3,7 +3,7 @@ name: lawwiz
 
 services:
   mysql:
-    image: mysql:9.7
+    build: {context: ./mysql-init, dockerfile: Dockerfile}
     restart: unless-stopped
     command:
       - --character-set-server=utf8mb4
@@ -22,8 +22,6 @@ services:
       KB_MYSQL_PASSWORD: ${KB_MYSQL_PASSWORD:?必须设置独立知识库数据库密码}
     volumes:
       - lawwiz-mysql:/var/lib/mysql
-      # 官方镜像只在首次初始化空卷时执行该脚本，业务库与知识库分别授权。
-      - ./mysql-init/20-knowledge-base.sh:/docker-entrypoint-initdb.d/20-knowledge-base.sh:ro
     healthcheck:
       test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u"$$MYSQL_USER" -e "SELECT 1" >/dev/null 2>&1']
       interval: 10s
@@ -47,16 +45,15 @@ services:
     networks: [data]
 
   backend:
-    build: {context: ../backend, dockerfile: Dockerfile}
+    build: {context: ../backend-java, dockerfile: Dockerfile}
     image: lawwiz-backend:latest
     restart: unless-stopped
     environment:
       LAWWIZ_APP_ENV: production
-      LAWWIZ_DEBUG: "false"
+      LAWWIZ_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
       LAWWIZ_ALLOW_FIXED_VERIFY_CODE: "false"
-      LAWWIZ_DB_HOST: mysql
-      LAWWIZ_DB_PORT: "3306"
-      LAWWIZ_DB_NAME: ${LAWWIZ_DB_NAME:-law_wiz}
+      LAWWIZ_JDBC_URL: jdbc:mysql://mysql:3306/${LAWWIZ_DB_NAME:-law_wiz}?connectionTimeZone=Asia/Shanghai
       LAWWIZ_DB_USER: ${LAWWIZ_DB_USER:-lawwiz}
       LAWWIZ_DB_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须设置业务数据库密码}
       LAWWIZ_REDIS_URL: redis://redis:6379/0
@@ -64,8 +61,12 @@ services:
       LAWWIZ_AI_SERVICE_BASE_URL: http://ai-service:8200
       LAWWIZ_AI_SERVICE_TOKEN: ${LAWWIZ_AI_SERVICE_TOKEN:?必须设置独立 AI 服务令牌}
       LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS: ${LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS:-65}
-      LAWWIZ_STORAGE_BACKEND: local
       LAWWIZ_STORAGE_LOCAL_ROOT: /app/.data
+      LAWWIZ_STORAGE_S3_ENDPOINT: http://rustfs:9000
+      LAWWIZ_STORAGE_S3_BUCKET: ${LAWWIZ_STORAGE_S3_BUCKET:-lawwiz-files}
+      LAWWIZ_STORAGE_S3_ACCESS_KEY: ${LAWWIZ_STORAGE_S3_ACCESS_KEY:?必须设置对象存储 access key}
+      LAWWIZ_STORAGE_S3_SECRET_KEY: ${LAWWIZ_STORAGE_S3_SECRET_KEY:?必须设置对象存储 secret key}
+      LAWWIZ_STORAGE_S3_INITIALIZE: "true"
       LAWWIZ_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
       LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY: ${LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY:?必须设置知识库只读凭证}
       LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY: ${LAWWIZ_KNOWLEDGE_BASE_WRITER_KEY:-}
@@ -73,19 +74,37 @@ services:
       LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS: ${LAWWIZ_KNOWLEDGE_BASE_ADMIN_USER_IDS:-[]}
     # 保留宿主回环入口，供运维检查和已有工具使用。
     ports: ["127.0.0.1:${LAWWIZ_BACKEND_PORT:-8000}:8000"]
-    volumes: [lawwiz-data:/app/.data]
+    volumes: [lawwiz-data:/app/.data:ro]
     depends_on:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
       knowledge-base: {condition: service_healthy}
+      rustfs: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://127.0.0.1:8000/api/health"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
     mem_limit: 384m
     networks: [data, knowledge, business-web, inference]
+
+  rustfs:
+    image: rustfs/rustfs:1.0.5
+    restart: unless-stopped
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_ACCESS_KEY: ${LAWWIZ_STORAGE_S3_ACCESS_KEY:?必须设置对象存储 access key}
+      RUSTFS_SECRET_KEY: ${LAWWIZ_STORAGE_S3_SECRET_KEY:?必须设置对象存储 secret key}
+    volumes: [lawwiz-rustfs:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "3", "http://127.0.0.1:9000/health"]
+      interval: 10s
+      timeout: 4s
+      retries: 15
+    mem_limit: 256m
+    networks: [data]
 
   ai-service:
     build: {context: ../ai-service, dockerfile: Dockerfile}
@@ -183,6 +202,7 @@ volumes:
   lawwiz-redis:
   lawwiz-data:
   lawwiz-kb-data:
+  lawwiz-rustfs:
 
 networks:
   inference:

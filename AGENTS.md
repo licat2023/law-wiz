@@ -3,7 +3,7 @@
 面向在本仓库工作的 AI 代理与协作者的约定。**只写对未来任务有用的信息**：
 操作历史、已关闭的 Issue 编号、临时绕过手段属于 commit message，不属于本文件。
 
-业务 FastAPI 负责用户、文件、审查和问答状态。独立 AI 服务运行两个 Agent，通过只读凭据访问知识库。知识库独立持有文档、索引和 Chroma。
+Spring Boot 业务后端负责用户、文件、审查和问答状态，通过 MyBatis 访问 MySQL，使用 Redis 保存令牌、限流和幂等数据，合同和报告写入 RustFS。独立 Python AI 服务运行两个 Agent，以只读凭据访问知识库。知识库独立持有文档、索引和 Chroma。
 
 开始、恢复或接手需要施工记录的工作前，先读 [任务总索引](docs/tasks/README.md)。已有对应任务时再读主文档，核对有效需求、当前理解、状态、负责人、依赖和已有改动。文件范围、施工进度和验证记录维护在 [任务目录](docs/tasks/) 对应主文档中。
 
@@ -13,7 +13,8 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `backend/` | 业务 FastAPI，`app/domains/` 按领域组织 |
+| `backend-java/` | Spring Boot 业务后端及文件迁移命令 |
+| `backend/` | 旧业务 FastAPI，供迁移对照与回退 |
 | `ai-service/` | 独立推理服务，运行合同审查与法律问答 Agent |
 | `frontend/` | 智法宝用户界面 |
 | `knowledge_base/backend/` | 知识库 FastAPI、文档入库、索引和检索 |
@@ -22,13 +23,13 @@
 | `docs/` | 设计、接口、架构决策和任务记录 |
 | `tools/` | 语料和文档辅助工具 |
 
-`contracts/` 管合同版本和正文，`contract_review/` 管审查任务、规则和报告。业务后端通过内部 HTTP 发送结构化输入并持久化结果。新增业务 ORM 模型须登记到 `app/infrastructure/database/models.py`。知识库模型登记在 `app/infrastructure/models.py`。
+`backend-java/` 的业务实现按领域组织。通过内部 HTTP 发送结构化输入并持久化结果。业务库的新卷初始化使用 `deploy/mysql-init/10-business-schema.sql`，已有库使用显式升级 SQL。知识库模型登记在其 `app/infrastructure/models.py`。
 
 业务后端通过统一 HTTP 客户端访问知识库。知识库解析入库文件、切分并发布索引，业务后端本地提取审查合同的正文。知识库生产嵌入使用远程服务，内嵌 Chroma 由单 worker 持有。
 
 ## 常用命令
 
-各后端执行 `uv sync --frozen --extra dev`、`uv run --extra dev ruff check app` 和 `uv run --extra dev ruff format --check app`。各前端执行 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm run build`。
+Java 后端执行 `mvn -B -ntp package`，用 Java 21 构建。Python 项目使用各自的锁文件和标准解释器执行 Ruff 检查。各前端执行 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm run build`。
 
 开发和生产启动、空库初始化及站点配置见 [部署说明](deploy/README.md)。构建两个站点时保持相对 `/api`，各前端容器连接自己的后端。通过 [Demo 指南](docs/06-MVP演示指南.md) 核对入库、审查报告与问答引用。
 
@@ -53,7 +54,7 @@
 - **AI 相关接口必须带 `Idempotency-Key`**（`POST /reviews`、`POST /qa/sessions/{id}/messages`）。
 - **同一个外部能力只在一处封装**，其它地方复用该封装。一期**不建 Provider 接口体系**
   （ADR-0012）—— 业务代码里不要出现同一个厂商 SDK 的分散调用，那会让将来真要替换时无处下手。
-- **数据库访问一律走异步栈**：`AsyncSession` + aiomysql（`infrastructure/database/session.py`），
+- **Python 后端的数据库访问走异步栈**：`AsyncSession` + aiomysql（`infrastructure/database/session.py`），
   路由 / 服务 / 流水线统一 `await`；**不要**引入同步 `Session`、`create_engine` 或 pymysql 驱动
   —— 异步上下文里用同步会话会抛 `MissingGreenlet`，同步驱动会阻塞事件循环。Redis 同理，用 `redis.asyncio`。
 - **不要访问 ORM 关系属性**（`task.report`、`session.messages` 之类）：异步会话下它会触发
@@ -62,7 +63,7 @@
   MySQL 不支持 `INSERT ... RETURNING`，只写 `server_default` 的话，插入后读该列会触发
   隐式 SELECT —— 异步会话里同样抛 `MissingGreenlet`，而 **SQLite 测试测不出来**
   （SQLite 支持 RETURNING），只有连真实 MySQL 才暴露。实测：C-01 曾返回 50000 而 143 个用例全绿。
-- **重活一律过 `asyncio.to_thread`**：bcrypt 口令哈希、PDF 解析与报告生成、向量检索、
+- **Python 异步服务的同步重活使用 `asyncio.to_thread`**：bcrypt 口令哈希、PDF 解析与报告生成、向量检索、
   同步计算与外部 SDK 调用、本地磁盘读写都已移出事件循环（`domains/auth/security.py`、各领域的
   `service.py` / `pipeline.py`）。**新增这类调用时照做** —— 在 `async def` 里直接同步调用
   会占住事件循环（期间所有请求排队），而**功能测试不会发现**。

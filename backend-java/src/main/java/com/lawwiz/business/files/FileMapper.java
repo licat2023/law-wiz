@@ -1,6 +1,7 @@
 package com.lawwiz.business.files;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.ibatis.annotations.Insert;
@@ -42,4 +43,13 @@ interface FileMapper {
             WHERE id = #{id} AND storage_bucket = 'local'
             """)
     void markMigrated(BigInteger id, String bucket);
+
+    @Select("SELECT " + COLUMNS + " FROM file_object WHERE id > #{after} ORDER BY id LIMIT 100")
+    List<StoredFile> migrationBatch(BigInteger after);
+
+    @Update("""
+            UPDATE file_object SET storage_bucket = #{target}, updated_at = CURRENT_TIMESTAMP(3)
+            WHERE id = #{id} AND storage_bucket = #{source}
+            """)
+    int changeLocation(BigInteger id, String source, String target);
 }

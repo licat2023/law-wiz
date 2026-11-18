@@ -5,6 +5,8 @@
   // “未知的导入符号”。分根之后各自解析，互不干扰。
   // 打开方式：`code law-wiz.code-workspace`。
   "folders": [
+    { "name": "backend-java", "path": "backend-java" },
+    { "name": "ai-service", "path": "ai-service" },
     { "name": "backend", "path": "backend" },
     { "name": "knowledge-base/backend", "path": "knowledge_base/backend" },
     { "name": "knowledge-base/frontend", "path": "knowledge_base/frontend" },

@@ -27,11 +27,19 @@ mybatis:
 server:
   port: "${LAWWIZ_SERVER_PORT:8000}"
   shutdown: graceful
+  forward-headers-strategy: native
   tomcat:
     threads:
       min-spare: 2
       max: 24
     max-swallow-size: 21MB
+springdoc:
+  api-docs:
+    enabled: "${LAWWIZ_API_DOCS_ENABLED:true}"
+    path: /openapi.json
+  swagger-ui:
+    path: /docs
+  paths-to-match: /api/**
 lawwiz:
   environment: "${LAWWIZ_APP_ENV:development}"
   jwt-secret: "${LAWWIZ_JWT_SECRET:dev-only-insecure-secret-change-me}"

@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 
 import com.lawwiz.business.api.ApiError;
@@ -21,19 +22,22 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /** Write content-addressed objects to RustFS and read legacy volume objects during migration. */
 @Component
-public class ObjectStorage {
+public class ObjectStorage implements org.springframework.boot.ApplicationRunner {
     private final S3Client s3;
     private final String bucket;
     private final Path legacyRoot;
+    private final boolean initializeOnStartup;
 
     public ObjectStorage(
             @Value("${LAWWIZ_STORAGE_S3_ENDPOINT:}") String endpoint,
             @Value("${LAWWIZ_STORAGE_S3_ACCESS_KEY:}") String accessKey,
             @Value("${LAWWIZ_STORAGE_S3_SECRET_KEY:}") String secretKey,
             @Value("${LAWWIZ_STORAGE_S3_BUCKET:lawwiz-files}") String bucket,
-            @Value("${LAWWIZ_STORAGE_LOCAL_ROOT:./.data}") Path legacyRoot) {
+            @Value("${LAWWIZ_STORAGE_LOCAL_ROOT:./.data}") Path legacyRoot,
+            @Value("${LAWWIZ_STORAGE_S3_INITIALIZE:false}") boolean initializeOnStartup) {
         this.bucket = bucket;
         this.legacyRoot = legacyRoot.toAbsolutePath().normalize();
+        this.initializeOnStartup = initializeOnStartup;
         s3 = endpoint.isBlank() ? null : S3Client.builder()
                 .endpointOverride(URI.create(endpoint)).region(Region.US_EAST_1).forcePathStyle(true)
                 .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey)))
@@ -44,6 +48,46 @@ public class ObjectStorage {
 
     public String bucket() {
         return bucket;
+    }
+
+    @Override
+    public void run(org.springframework.boot.ApplicationArguments arguments) {
+        if (initializeOnStartup && !arguments.containsOption("lawwiz.file-migration")) {
+            initializeBucket();
+        }
+    }
+
+    public void initializeBucket() {
+        try {
+            requireS3().headBucket(request -> request.bucket(bucket));
+        } catch (S3Exception error) {
+            if (error.statusCode() != 404) {
+                throw unavailable();
+            }
+            try {
+                requireS3().createBucket(request -> request.bucket(bucket));
+            } catch (SdkException failure) {
+                throw unavailable();
+            }
+        } catch (SdkException error) {
+            throw unavailable();
+        }
+    }
+
+    void writeLegacy(String key, byte[] bytes) {
+        Path target = legacyPath(key);
+        try {
+            Files.createDirectories(target.getParent());
+            Path temporary = Files.createTempFile(target.getParent(), ".lawwiz-", ".part");
+            try {
+                Files.write(temporary, bytes);
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+        } catch (IOException error) {
+            throw new ApiError(50000, "旧文件卷写入失败");
+        }
     }
 
     public boolean exists(String location, String key) {
@@ -68,9 +112,17 @@ public class ObjectStorage {
     }
 
     void put(String location, String key, byte[] content, String mimeType) {
+        put(location, key, RequestBody.fromBytes(content), mimeType);
+    }
+
+    /** Upload from a temporary file so the S3 client can stream and retry the body. */
+    void put(String location, String key, Path file, String mimeType) {
+        put(location, key, RequestBody.fromFile(file), mimeType);
+    }
+
+    private void put(String location, String key, RequestBody body, String mimeType) {
         try {
-            requireS3().putObject(request -> request.bucket(location).key(key).contentType(mimeType),
-                    RequestBody.fromBytes(content));
+            requireS3().putObject(request -> request.bucket(location).key(key).contentType(mimeType), body);
         } catch (SdkException error) {
             throw unavailable();
         }

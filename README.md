@@ -28,12 +28,12 @@
 ## 技术栈概览
 
 - **前端**：Vue 3 + Vite + Element Plus
-- **后端**：FastAPI（Python）
+- **业务后端**：Java 21、Spring Boot、MyBatis；AI 与知识库使用 Python FastAPI
 - **AI 能力**：DeepSeek API + LangChain + Chroma（RAG）；OCR 为后续云端增强能力，当前 MVP 不接入（本地 OCR 因内存约束始终不部署）。
 - **区块链（P2 规划）**：FISCO BCOS + Solidity 智能合约 + Web3.py
 - **电子签章（P3 规划）**：第三方电子签章服务（开发者版）承担可靠电子签名效力，平台负责编排与存证（见 [ADR-0005](docs/adr/0005-signature-provider-abstraction.md)）
 - **密码算法**：RSA-2048 + SHA-256 主链路，国密 SM 系列为后期扩展点（见 [ADR-0003](docs/adr/0003-crypto-rsa-first-sm-later.md)）
-- **数据存储**：MySQL 9.7、Redis、本地持久化卷、进程内 Chroma；MinIO 为后续规划
+- **数据存储**：MySQL 9.7、Redis、RustFS、知识库独立卷与 Chroma
 - **部署运维**：Debian 13、Docker Compose、Nginx、1Panel OpenResty。开发和生产的应用服务均由 Compose 启动，OpenResty 提供 HTTPS。GitHub Actions 尚未配置，Prometheus/Grafana 与 ELK 为**后期可选**。见 [部署说明](deploy/README.md)。
 
 > **合规边界**：本项目参照 GB/T 38540-2020 的安全目标进行设计，但**不构成对该标准的合规声明** —— 该标准的合规性依赖经商用密码产品认证的密码模块。可靠电子签名能力由具备资质的第三方签章服务提供。
@@ -76,7 +76,8 @@
 
 ```text
 law-wiz/
-├── backend/          # 业务 FastAPI，负责鉴权、文件、任务与会话
+├── backend-java/     # Spring Boot 业务后端
+├── backend/          # 旧业务 FastAPI，用于迁移对照与回退
 ├── ai-service/       # 独立运行合同审查和法律问答 Agent
 ├── frontend/         # 智法宝用户端
 ├── knowledge_base/

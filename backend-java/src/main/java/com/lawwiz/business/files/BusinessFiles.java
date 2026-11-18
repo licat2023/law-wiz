@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.function.BiConsumer;
 
 import com.lawwiz.business.api.ApiError;
 import com.lawwiz.business.api.ApiValues;
@@ -54,11 +55,12 @@ public class BusinessFiles {
         }
         Path temporary = null;
         try {
-            temporary = Files.createTempFile("lawwiz-upload-", ".bin");
-            upload.transferTo(temporary);
-            var format = FileFormats.identify(temporary);
-            byte[] data = Files.readAllBytes(temporary);
-            return save(owner, safeName(upload.getOriginalFilename()), format.mimeType(), data, true);
+            Path staged = Files.createTempFile("lawwiz-upload-", ".bin");
+            temporary = staged;
+            upload.transferTo(staged);
+            String mime = FileFormats.identify(staged).mimeType();
+            return save(owner, safeName(upload.getOriginalFilename()), mime, ContentKeys.sha256(staged),
+                    Files.size(staged), true, (bucket, key) -> storage.put(bucket, key, staged, mime));
         } catch (IOException error) {
             throw new ApiError(50000, "无法读取上传文件");
         } finally {
@@ -74,7 +76,10 @@ public class BusinessFiles {
     }
 
     public BigInteger saveReport(BigInteger owner, String name, byte[] pdf) {
-        return ApiValues.id((String) save(owner, name, "application/pdf", pdf, false).get("file_id"));
+        String mime = "application/pdf";
+        var file = save(owner, name, mime, ContentKeys.sha256(pdf), pdf.length, false,
+                (bucket, key) -> storage.put(bucket, key, pdf, mime));
+        return ApiValues.id((String) file.get("file_id"));
     }
 
     public Source source(BigInteger fileId) {
@@ -94,34 +99,34 @@ public class BusinessFiles {
         return view(record);
     }
 
-    private Map<String, Object> save(BigInteger owner, String name, String mime, byte[] bytes, boolean checkQuota) {
-        String digest = ContentKeys.sha256(bytes);
+    private Map<String, Object> save(BigInteger owner, String name, String mime, String digest, long size,
+                                     boolean checkQuota, BiConsumer<String, String> writeObject) {
         var existing = files.findByDigest(digest);
         if (existing != null) {
             if (!storage.exists(existing.storageBucket(), existing.objectKey())) {
                 if ("local".equals(existing.storageBucket())) {
-                    storage.put(existing.objectKey(), bytes, mime);
+                    writeObject.accept(storage.bucket(), existing.objectKey());
                     files.markMigrated(existing.id(), storage.bucket());
                 } else {
-                    storage.put(existing.storageBucket(), existing.objectKey(), bytes, mime);
+                    writeObject.accept(existing.storageBucket(), existing.objectKey());
                 }
             }
             return uploadView(existing, true);
         }
         if (checkQuota) {
             var usage = files.usage(owner);
-            if (usage.bytes() + bytes.length > byteQuota || usage.files() + 1 > numberQuota) {
+            if (usage.bytes() + size > byteQuota || usage.files() + 1 > numberQuota) {
                 throw new ApiError(41301, "存储配额已满");
             }
         }
         String key = ContentKeys.key(digest);
-        storage.put(key, bytes, mime);
+        writeObject.accept(storage.bucket(), key);
         var data = new HashMap<String, Object>();
         data.put("digest", digest);
         data.put("bucket", storage.bucket());
         data.put("key", key);
         data.put("name", name);
-        data.put("size", (long) bytes.length);
+        data.put("size", size);
         data.put("mime", mime);
         data.put("owner", owner);
         try {
