@@ -11,3 +11,4 @@
 | T20261118-03 | 法律问答流式输出 | [实施记录](T20261118-03-qa-streaming.md) | 主 agent | 已完成 |
 | T20261118-04 | 法律助手答复与正文脚注 | [实施记录](T20261118-04-qa-assistant-footnotes.md) | 主 agent | 已完成 |
 | T20261118-05 | 风险报告原文与法条联调 | [实施记录](T20261118-05-review-clause-excerpts/) | 主 agent | 已完成 |
+| T20261118-06 | 合同审查双栏界面 | [实施记录](T20261118-06-review-workspace.md) | 主 agent | 已完成 |

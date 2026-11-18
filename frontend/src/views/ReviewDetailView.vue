@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 审查报告详情页（C-03 / C-04 / C-06）。
+ * 呈现所选任务的审查进度及报告（C-02 / C-03 / C-04 / C-06）。
  *
  * 契约要点（05-接口设计 §5.4）：
  * 1. C-03 仅在任务 succeeded 时可用 → 进入页面先轮询 C-02 到终态再取结果；
@@ -9,20 +9,21 @@
  * 4. 风险点可以带相对于 plain_text 的 char_start / char_end，当前页面通过
  *    clause_text 展示条款摘录。
  */
-import { Loading } from '@element-plus/icons-vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { ElMessage, type TagProps } from 'element-plus'
 
-import { http } from '@/api/client'
+import { ApiError, http } from '@/api/client'
 import { createSession } from '@/api/qa'
 import { dismissRiskPoint, getReviewResult, getReviewTask } from '@/api/review'
-import type {
-  ReviewResultData,
-  ReviewStage,
-  RiskLevel,
-  RiskPoint,
-  RiskSourceType,
+import {
+  ErrorCode,
+  type ReviewResultData,
+  type ReviewStage,
+  type ReviewTaskData,
+  type RiskLevel,
+  type RiskPoint,
+  type RiskSourceType,
 } from '@/api/types'
 
 const POLL_INTERVALS = [1000, 2000, 3000, 5000]
@@ -52,12 +53,16 @@ const SOURCE_META: Record<RiskSourceType, { label: string; type: TagProps['type'
   llm_inference: { label: '未找到直接法律依据，仅供参考', type: 'danger' },
 }
 
-const route = useRoute()
+const { taskId, documentTitle } = defineProps<{ taskId: string; documentTitle: string }>()
+const emit = defineEmits<{
+  'task-update': [task: ReviewTaskData]
+  'choose-file': []
+}>()
 const router = useRouter()
-const taskId = route.params.taskId as string
 
-const taskStatus = ref<'pending' | 'processing' | 'succeeded' | 'failed' | 'timeout' | null>(null)
-const stageText = ref('')
+const view = ref<'loading' | 'report' | 'failed' | 'timeout' | 'error'>('loading')
+const progress = ref(0)
+const stageText = ref('正在查询审查进度…')
 const failedMessage = ref('')
 const result = ref<ReviewResultData | null>(null)
 const dismissing = ref(false)
@@ -79,37 +84,57 @@ async function pollUntilTerminal() {
   while (!disposed && Date.now() < deadline) {
     try {
       const task = await getReviewTask(taskId)
+      if (disposed) return null
+      emit('task-update', task)
+      progress.value = task.progress
       if (task.status === 'succeeded' || task.status === 'failed') return task
-      stageText.value = (task.stage && STAGE_TEXT[task.stage]) || ''
-    } catch {
+      stageText.value = (task.stage && STAGE_TEXT[task.stage]) || '等待开始审查…'
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        (error.code === ErrorCode.REVIEW_NOT_FOUND ||
+          error.code === ErrorCode.FORBIDDEN ||
+          error.code === ErrorCode.PARAM_INVALID)
+      ) {
+        throw error
+      }
       // 网络抖动不中止轮询
     }
+    if (disposed) return null
     await sleep(POLL_INTERVALS[idx])
     idx = Math.min(idx + 1, POLL_INTERVALS.length - 1)
   }
   return null
 }
 
-onMounted(async () => {
+async function loadReview() {
+  view.value = 'loading'
+  stageText.value = '正在查询审查进度…'
   try {
     const task = await pollUntilTerminal()
     if (disposed) return
     if (!task) {
-      taskStatus.value = 'timeout'
+      view.value = 'timeout'
       return
     }
     if (task.status === 'failed') {
-      taskStatus.value = 'failed'
+      view.value = 'failed'
       failedMessage.value = task.error_message || '审查失败，请稍后重试'
       return
     }
-    taskStatus.value = 'succeeded'
-    result.value = await getReviewResult(taskId)
+    stageText.value = '正在加载风险报告…'
+    const report = await getReviewResult(taskId)
+    if (disposed) return
+    result.value = report
+    view.value = 'report'
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '加载报告失败，请稍后重试')
-    taskStatus.value = 'failed'
+    if (disposed) return
+    failedMessage.value = e instanceof Error ? e.message : '请稍后重试'
+    view.value = 'error'
   }
-})
+}
+
+onMounted(loadReview)
 
 /** C-06：标记/取消误报，成功后就地更新本地状态 */
 async function toggleDismiss(rp: RiskPoint) {
@@ -165,46 +190,54 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
 </script>
 
 <template>
-  <div class="page">
-    <el-page-header :content="`审查报告 #${taskId}`" @back="router.back()" />
-
+  <div :class="view === 'report' ? 'review-report' : 'review-status'">
     <!-- 审查进行中 -->
-    <el-card
-      v-if="taskStatus === 'pending' || taskStatus === 'processing'"
-      shadow="never"
-      style="margin-top: 16px"
-    >
-      <div class="loading-wrap">
-        <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-        <p>{{ stageText || '正在分析合同…' }}</p>
+    <div v-if="view === 'loading'" class="loading-wrap">
+      <div role="status">
+        <h2>{{ documentTitle || '审查进度' }}</h2>
+        <p>{{ stageText }}</p>
       </div>
-    </el-card>
+      <el-progress :percentage="progress" />
+    </div>
 
     <!-- 失败 -->
-    <el-card v-else-if="taskStatus === 'failed'" shadow="never" style="margin-top: 16px">
-      <el-result icon="error" title="审查失败" :sub-title="failedMessage">
-        <template #extra>
-          <el-button type="primary" @click="router.push('/review')">重新上传</el-button>
-        </template>
-      </el-result>
-    </el-card>
+    <el-result
+      v-else-if="view === 'failed'"
+      icon="error"
+      title="审查失败"
+      :sub-title="failedMessage"
+    >
+      <template #extra>
+        <el-button type="primary" @click="emit('choose-file')">上传文档</el-button>
+      </template>
+    </el-result>
+
+    <el-result
+      v-else-if="view === 'error'"
+      icon="error"
+      title="无法查看审查结果"
+      :sub-title="failedMessage"
+    >
+      <template #extra>
+        <el-button @click="loadReview">重试</el-button>
+      </template>
+    </el-result>
 
     <!-- 超时 -->
-    <el-card v-else-if="taskStatus === 'timeout'" shadow="never" style="margin-top: 16px">
-      <el-result
-        icon="info"
-        title="审查耗时较长"
-        sub-title="已超过 90 秒，请稍后从审查记录中查看结果"
-      >
-        <template #extra>
-          <el-button type="primary" @click="router.push('/review')">返回审查页</el-button>
-        </template>
-      </el-result>
-    </el-card>
+    <el-result
+      v-else-if="view === 'timeout'"
+      icon="info"
+      title="审查耗时较长"
+      sub-title="审查任务仍可在左侧打开。"
+    >
+      <template #extra>
+        <el-button type="primary" @click="loadReview">刷新进度</el-button>
+      </template>
+    </el-result>
 
     <!-- 报告 -->
     <template v-else-if="result">
-      <el-card shadow="never" style="margin-top: 16px">
+      <el-card shadow="never">
         <div class="report-header">
           <div>
             <h2 class="report-title">{{ result.contract_title }}</h2>
@@ -220,7 +253,7 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
       </el-card>
 
       <!-- 关键条款提取 -->
-      <el-card v-if="result.extracted_terms" shadow="never" style="margin-top: 16px">
+      <el-card v-if="result.extracted_terms" shadow="never">
         <template #header>关键条款提取</template>
         <el-descriptions :column="2" border>
           <el-descriptions-item
@@ -249,7 +282,7 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
       </el-card>
 
       <!-- 风险点（按等级分组） -->
-      <el-card v-for="lv in LEVEL_ORDER" :key="lv" shadow="never" style="margin-top: 16px">
+      <el-card v-for="lv in LEVEL_ORDER" :key="lv" shadow="never">
         <template #header> {{ LEVEL_META[lv].label }}（{{ grouped[lv].length }}） </template>
         <el-empty v-if="grouped[lv].length === 0" description="未发现该等级风险" :image-size="60" />
         <div
@@ -307,10 +340,33 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
 </template>
 
 <style scoped>
+.review-status {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
 .loading-wrap {
+  width: min(420px, 100%);
   text-align: center;
-  padding: 32px 0;
-  color: var(--el-text-color-secondary);
+}
+.loading-wrap h2 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.loading-wrap p {
+  margin: 8px 0 18px;
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+}
+.review-report {
+  display: grid;
+  gap: 16px;
+  max-width: 1180px;
+  padding: clamp(12px, 2.2vw, 28px);
+  margin-inline: auto;
+  overflow-wrap: anywhere;
 }
 .report-header {
   display: flex;
@@ -393,5 +449,10 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
 }
 .risk-actions {
   margin-top: 8px;
+}
+@media (max-width: 560px) {
+  .report-header {
+    flex-direction: column;
+  }
 }
 </style>

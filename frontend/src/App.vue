@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /** 业务界面外壳，负责全局导航及页面刷新后的用户资料恢复。 */
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const showingReview = computed(() => route.name === 'review' || route.name === 'review-detail')
 
 onMounted(async () => {
   // 刷新页面后从令牌恢复登录态
@@ -27,7 +29,7 @@ async function handleLogout() {
 </script>
 
 <template>
-  <el-container class="app-shell">
+  <el-container class="app-shell" :class="{ 'app-shell--review': showingReview }">
     <el-header class="app-header">
       <div class="brand" @click="router.push('/')">
         <span class="brand-mark">智法宝</span>
@@ -37,7 +39,7 @@ async function handleLogout() {
       <el-menu
         v-if="auth.isAuthenticated"
         mode="horizontal"
-        :default-active="$route.path"
+        :default-active="showingReview ? '/review' : route.path"
         :ellipsis="false"
         class="app-menu"
         router
@@ -116,5 +118,30 @@ async function handleLogout() {
 
 .app-main {
   background: var(--el-bg-color-page);
+}
+
+.app-shell--review {
+  height: 100dvh;
+  min-height: 0;
+}
+.app-shell--review .app-main {
+  display: flex;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 700px) {
+  .app-shell--review .app-header {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+  .app-shell--review .brand-sub,
+  .app-shell--review .who {
+    display: none;
+  }
+  .app-shell--review .app-menu :deep(.el-menu-item) {
+    padding-inline: clamp(6px, 2vw, 12px);
+  }
 }
 </style>

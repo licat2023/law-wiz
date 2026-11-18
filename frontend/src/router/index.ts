@@ -3,6 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { tokenStore } from '@/api/client'
 
+const reviewWorkspace = () => import('@/views/ReviewView.vue')
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -22,13 +24,13 @@ const router = createRouter({
     {
       path: '/review',
       name: 'review',
-      component: () => import('@/views/ReviewView.vue'),
+      component: reviewWorkspace,
       meta: { title: '合同审查' },
     },
     {
       path: '/review/:taskId',
       name: 'review-detail',
-      component: () => import('@/views/ReviewDetailView.vue'),
+      component: reviewWorkspace,
       meta: { title: '审查报告' },
     },
     {
