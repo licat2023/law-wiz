@@ -9,6 +9,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const showingReview = computed(() => route.name === 'review' || route.name === 'review-detail')
+const showingWorkspace = computed(() => showingReview.value || route.name === 'qa')
 
 onMounted(async () => {
   // 刷新页面后从令牌恢复登录态
@@ -29,7 +30,7 @@ async function handleLogout() {
 </script>
 
 <template>
-  <el-container class="app-shell" :class="{ 'app-shell--review': showingReview }">
+  <el-container class="app-shell" :class="{ 'app-shell--workspace': showingWorkspace }">
     <el-header class="app-header">
       <div class="brand" @click="router.push('/')">
         <span class="brand-mark">智法宝</span>
@@ -120,11 +121,11 @@ async function handleLogout() {
   background: var(--el-bg-color-page);
 }
 
-.app-shell--review {
+.app-shell--workspace {
   height: 100dvh;
   min-height: 0;
 }
-.app-shell--review .app-main {
+.app-shell--workspace .app-main {
   display: flex;
   min-height: 0;
   padding: 0;
@@ -132,15 +133,15 @@ async function handleLogout() {
 }
 
 @media (max-width: 700px) {
-  .app-shell--review .app-header {
+  .app-shell--workspace .app-header {
     gap: 8px;
     padding-inline: 12px;
   }
-  .app-shell--review .brand-sub,
-  .app-shell--review .who {
+  .app-shell--workspace .brand-sub,
+  .app-shell--workspace .who {
     display: none;
   }
-  .app-shell--review .app-menu :deep(.el-menu-item) {
+  .app-shell--workspace .app-menu :deep(.el-menu-item) {
     padding-inline: clamp(6px, 2vw, 12px);
   }
 }

@@ -9,7 +9,7 @@
  * 3. 正式助手消息的 `[编号]` 与引用快照对应，生成中只显示正文；
  * 4. 订阅中断时用 E-03 取回结果，等待回答期间同一页面只处理一条问答。
  */
-import { Loading } from '@element-plus/icons-vue'
+import { ChatDotRound, Loading, Plus } from '@element-plus/icons-vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -25,7 +25,8 @@ import {
 } from '@/api/qa'
 import { listReviews } from '@/api/review'
 import type { QaMessage, QaSession, ReviewListItem } from '@/api/types'
-import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
+import SidebarEntry from '@/components/SidebarEntry.vue'
+import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 
 const POLL_INTERVALS = [1000, 2000, 3000, 5000]
 const POLL_TIMEOUT = 90_000
@@ -374,40 +375,34 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="qa-container">
-    <aside class="side">
-      <el-button
-        type="primary"
-        style="width: 100%"
-        :disabled="loadingSession || waiting"
-        @click="newChat"
+  <div class="workspace-with-sidebar">
+    <WorkspaceSidebar heading="历史会话">
+      <template #toolbar>
+        <el-button
+          type="primary"
+          :icon="Plus"
+          :disabled="loadingSession || waiting"
+          @click="newChat"
+        >
+          新建对话
+        </el-button>
+      </template>
+      <SidebarEntry
+        v-for="s in sessions"
+        :key="s.session_id"
+        :title="s.title || '新对话'"
+        :selected="s.session_id === currentSession?.session_id"
+        :busy="loadingSession || waiting"
+        @select="selectSession(s.session_id)"
+        @archive="archive(s)"
       >
-        新建对话
-      </el-button>
+        <template #icon><ChatDotRound /></template>
+        <span>{{ s.message_count }} 条消息</span>
+      </SidebarEntry>
+      <el-empty v-if="sessions.length === 0" description="暂无历史会话" :image-size="60" />
+    </WorkspaceSidebar>
 
-      <div class="session-list">
-        <div v-for="s in sessions" :key="s.session_id" class="archive-action-row">
-          <button
-            type="button"
-            class="session-item"
-            :class="{ active: s.session_id === currentSession?.session_id }"
-            :aria-current="s.session_id === currentSession?.session_id ? 'true' : undefined"
-            @click="selectSession(s.session_id)"
-          >
-            <span class="session-title">{{ s.title || '新对话' }}</span>
-            <span class="session-meta">{{ s.message_count }} 条消息</span>
-          </button>
-          <ArchiveRowActions
-            mode="archive"
-            :busy="loadingSession || waiting"
-            @archive="archive(s)"
-          />
-        </div>
-        <el-empty v-if="sessions.length === 0" description="暂无历史会话" :image-size="60" />
-      </div>
-    </aside>
-
-    <main class="chat">
+    <section class="chat" aria-label="问答内容">
       <template v-if="currentSession">
         <div v-if="currentSession.review_context" class="review-context">
           <router-link
@@ -547,66 +542,11 @@ onMounted(async () => {
       <p v-else-if="currentSession?.status === 'archived'" class="archive-note">
         此会话已归档，可到个人中心还原。
       </p>
-    </main>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.qa-container {
-  display: flex;
-  gap: 16px;
-  height: calc(100vh - 60px - 40px);
-}
-.side {
-  width: 260px;
-  flex-shrink: 0;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 16px;
-  overflow-y: auto;
-}
-.session-list {
-  margin-top: 12px;
-}
-.session-list .archive-action-row {
-  margin-bottom: 4px;
-}
-.session-item {
-  display: block;
-  width: 100%;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.session-item:focus-visible {
-  outline: 2px solid var(--el-color-primary);
-  outline-offset: -2px;
-}
-.session-item:hover {
-  background: #f5f7fa;
-}
-.session-item.active {
-  background: var(--el-color-primary-light-9);
-}
-.session-title {
-  display: block;
-  font-size: 14px;
-  color: #333;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.session-meta {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-  color: #999;
-}
 .archive-note {
   margin: 0;
   border-top: 1px solid var(--el-border-color-light);
@@ -615,8 +555,8 @@ onMounted(async () => {
   font-size: 14px;
 }
 .chat {
-  flex: 1;
   min-width: 0;
+  min-height: 0;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -637,6 +577,7 @@ onMounted(async () => {
 }
 .msg-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px;
 }

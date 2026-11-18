@@ -1,29 +1,18 @@
 <script setup lang="ts">
-/** 个人中心展示账号信息、审查记录与归档管理。 */
+/** 个人中心展示账号信息与归档管理。 */
 import { computed, onMounted, ref, watch } from 'vue'
 import { ChatDotRound, Document } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { useRouter } from 'vue-router'
 import { deleteArchivedSession, listSessions, restoreSession } from '@/api/qa'
 import { deleteArchivedReview, listReviews, setReviewArchived } from '@/api/review'
-import type { Page, ReviewListItem, ReviewStatus } from '@/api/types'
+import type { Page } from '@/api/types'
 import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
 
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 
-const REVIEW_STATUS_META: Record<ReviewStatus, { label: string; type: TagProps['type'] }> = {
-  pending: { label: '待处理', type: 'info' },
-  processing: { label: '审查中', type: 'warning' },
-  succeeded: { label: '已完成', type: 'success' },
-  failed: { label: '失败', type: 'danger' },
-}
-
-const router = useRouter()
-const history = ref<ReviewListItem[]>([])
-const historyLoading = ref(false)
 const ARCHIVE_PAGE_SIZE = 10
 const ARCHIVE_TABS = [
   { name: 'review', label: '审查文档' },
@@ -42,22 +31,6 @@ const archiveTotal = ref(0)
 const archiveLoading = ref(false)
 const archiveError = ref(false)
 const archiveBusy = ref(false)
-
-async function loadHistory() {
-  historyLoading.value = true
-  try {
-    const page = await listReviews({ page: 1, page_size: 10 })
-    history.value = page.items
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '加载审查记录失败')
-  } finally {
-    historyLoading.value = false
-  }
-}
-
-function statusMeta(status: ReviewStatus) {
-  return REVIEW_STATUS_META[status]
-}
 
 async function fetchArchivePage(page: number): Promise<Page<ArchiveItem>> {
   const params = { page, page_size: ARCHIVE_PAGE_SIZE }
@@ -136,7 +109,6 @@ async function manageArchived(item: ArchiveItem, action: 'restore' | 'delete') {
       await restoreSession(item.id)
     } else {
       await setReviewArchived(item.id, false)
-      void loadHistory()
     }
     ElMessage.success(action === 'delete' ? '已彻底删除' : '已还原')
     archived.value = archived.value.filter((row) => row.id !== item.id)
@@ -152,7 +124,6 @@ async function manageArchived(item: ArchiveItem, action: 'restore' | 'delete') {
 
 onMounted(async () => {
   if (!auth.user) await auth.fetchMe().catch(() => undefined)
-  void loadHistory()
   void loadArchive()
 })
 </script>
@@ -180,44 +151,6 @@ onMounted(async () => {
           {{ auth.user?.created_at?.replace('T', ' ').slice(0, 19) ?? '—' }}
         </el-descriptions-item>
       </el-descriptions>
-    </el-card>
-    <el-card shadow="never" style="margin-top: 20px">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>合同审查记录</span>
-          <el-button link type="primary" @click="loadHistory">刷新</el-button>
-        </div>
-      </template>
-      <el-table v-loading="historyLoading" :data="history">
-        <template #empty>暂无审查记录</template>
-        <el-table-column prop="contract_title" label="合同名称" min-width="160" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusMeta(row.status).type" size="small">
-              {{ statusMeta(row.status).label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="高/中/低风险" width="140">
-          <template #default="{ row }">
-            <span class="cnt-high">{{ row.counts.high }}</span> /
-            <span class="cnt-mid">{{ row.counts.medium }}</span> /
-            <span class="cnt-low">{{ row.counts.low }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ row.created_at.replace('T', ' ').slice(0, 19) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="router.push(`/review/${row.task_id}`)">
-              查看
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
     </el-card>
     <el-card class="archive-card" shadow="never">
       <template #header>
@@ -282,17 +215,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.cnt-high {
-  color: var(--el-color-danger);
-  font-weight: 600;
-}
-.cnt-mid {
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
-.cnt-low {
-  color: var(--el-text-color-secondary);
-}
 .archive-card {
   margin-top: 20px;
 }

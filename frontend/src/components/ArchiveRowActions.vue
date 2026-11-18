@@ -47,6 +47,12 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
 
 <style>
 .archive-action-row {
+  --archive-icon-size: 32px;
+  --archive-box-start: 28px;
+  --archive-box-end: 8px;
+  --archive-box-width: calc(
+    var(--archive-icon-size) + var(--archive-box-start) + var(--archive-box-end)
+  );
   position: relative;
 }
 .archive-action-row .archive-row-actions {
@@ -55,7 +61,7 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 8px 0 28px;
+  padding: 0 var(--archive-box-end) 0 var(--archive-box-start);
   border-radius: 0 6px 6px 0;
   background: linear-gradient(90deg, transparent, var(--el-bg-color) 42%);
   pointer-events: none;
@@ -68,8 +74,8 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
 .archive-action-row .archive-row-action {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: var(--archive-icon-size);
+  height: var(--archive-icon-size);
   padding: 0;
   border: 0;
   border-radius: 5px;

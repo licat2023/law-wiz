@@ -28,6 +28,25 @@ body {
   background: var(--el-bg-color-page);
 }
 
+/* 合同审查与法律问答使用一致的双栏尺寸。 */
+.workspace-with-sidebar {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  flex: 1;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(12px, 1.5vw, 24px);
+}
+
+@media (max-width: 700px) {
+  .workspace-with-sidebar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+    gap: 10px;
+  }
+}
+
 /* 页面主容器：限制最大宽度，避免宽屏下表单与表格被拉得过长 */
 .page {
   max-width: 1080px;

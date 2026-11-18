@@ -14,7 +14,8 @@ import {
 } from '@/api/review'
 import { ApiError } from '@/api/client'
 import { ErrorCode, type ReviewListItem, type ReviewStatus, type ReviewTaskData } from '@/api/types'
-import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
+import SidebarEntry from '@/components/SidebarEntry.vue'
+import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import ReviewDetailView from './ReviewDetailView.vue'
 
 const PAGE_SIZE = 20
@@ -253,14 +254,14 @@ onUnmounted(() => {
 <template>
   <div
     ref="workspace"
-    class="review-workspace"
+    class="review-workspace workspace-with-sidebar"
     @dragenter="enterDrag"
     @dragover="allowDrop"
     @dragleave="leaveDrag"
     @drop="dropFiles"
   >
-    <aside class="review-documents" aria-labelledby="review-documents-title">
-      <div class="documents-header">
+    <WorkspaceSidebar heading="审查文档" :busy="listLoading">
+      <template #toolbar>
         <el-button type="primary" :icon="Upload" :disabled="uploading" @click="chooseFile">
           上传文档
         </el-button>
@@ -271,65 +272,54 @@ onUnmounted(() => {
           hidden
           @change="handleFileInput"
         />
-        <h2 id="review-documents-title">审查文档</h2>
-      </div>
-      <div class="documents-list" :aria-busy="listLoading">
-        <RouterLink v-if="submission" class="document-row" :to="{ name: 'review' }">
-          <el-icon class="document-icon" aria-hidden="true"><Document /></el-icon>
-          <span class="document-info">
-            <span class="document-name" :title="submission.file.name">{{
-              submission.file.name
-            }}</span>
-            <span class="document-status" :data-status="uploadError ? 'failed' : 'processing'">
-              {{ uploadError ? '提交失败' : '正在提交' }}
-            </span>
-          </span>
-        </RouterLink>
-        <div v-for="item in documents" :key="item.task_id" class="archive-action-row">
-          <RouterLink
-            class="document-row"
-            :to="{ name: 'review-detail', params: { taskId: item.task_id } }"
-          >
-            <el-icon class="document-icon" aria-hidden="true"><Document /></el-icon>
-            <span class="document-info">
-              <span class="document-name" :title="item.contract_title">{{
-                item.contract_title
-              }}</span>
-              <span class="document-meta">
-                <span class="document-status" :data-status="item.status">
-                  {{ STATUS_LABEL[item.status] }}
-                </span>
-                <span v-if="item.created_at">{{ item.created_at.slice(0, 10) }}</span>
-              </span>
-            </span>
-          </RouterLink>
-          <ArchiveRowActions
-            mode="archive"
-            :busy="archiveBusy"
-            @archive="archiveDocument(item.task_id)"
-          />
-        </div>
+      </template>
+      <SidebarEntry
+        v-if="submission"
+        :title="submission.file.name"
+        :selected="selectedTaskId === null"
+        :to="{ name: 'review' }"
+        :archivable="false"
+      >
+        <template #icon><Document /></template>
+        <span class="document-status" :data-status="uploadError ? 'failed' : 'processing'">
+          {{ uploadError ? '提交失败' : '正在提交' }}
+        </span>
+      </SidebarEntry>
+      <SidebarEntry
+        v-for="item in documents"
+        :key="item.task_id"
+        :title="item.contract_title || '未命名合同'"
+        :selected="item.task_id === selectedTaskId"
+        :to="{ name: 'review-detail', params: { taskId: item.task_id } }"
+        :busy="archiveBusy"
+        @archive="archiveDocument(item.task_id)"
+      >
+        <template #icon><Document /></template>
+        <span class="document-status" :data-status="item.status">{{
+          STATUS_LABEL[item.status]
+        }}</span>
+        <span v-if="item.created_at">{{ item.created_at.slice(0, 10) }}</span>
+      </SidebarEntry>
 
-        <p v-if="listLoading && !documents.length" class="list-hint">正在加载文档…</p>
-        <p v-else-if="!listFailed && !documents.length && !submission" class="list-hint">
-          暂无审查文档
-        </p>
-        <div v-if="listFailed" class="list-hint" role="status">
-          文档列表加载失败
-          <el-button link type="primary" @click="loadDocuments()">重试</el-button>
-        </div>
-        <el-button
-          v-else-if="hasMore"
-          class="load-more"
-          link
-          type="primary"
-          :loading="listLoading"
-          @click="loadDocuments()"
-        >
-          加载更多
-        </el-button>
+      <p v-if="listLoading && !documents.length" class="list-hint">正在加载文档…</p>
+      <p v-else-if="!listFailed && !documents.length && !submission" class="list-hint">
+        暂无审查文档
+      </p>
+      <div v-if="listFailed" class="list-hint" role="status">
+        文档列表加载失败
+        <el-button link type="primary" @click="loadDocuments()">重试</el-button>
       </div>
-    </aside>
+      <el-button
+        v-else-if="hasMore"
+        class="load-more"
+        link
+        type="primary"
+        :loading="listLoading"
+        @click="loadDocuments()"
+      >
+        加载更多
+      </el-button>
+    </WorkspaceSidebar>
 
     <section class="review-content" aria-labelledby="review-page-title">
       <header class="content-header">
@@ -388,15 +378,7 @@ onUnmounted(() => {
 <style scoped>
 .review-workspace {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
-  gap: 16px;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding: clamp(12px, 1.5vw, 24px);
 }
-.review-documents,
 .review-content {
   min-width: 0;
   min-height: 0;
@@ -407,74 +389,12 @@ onUnmounted(() => {
   background: var(--el-bg-color);
   overflow: hidden;
 }
-.documents-header {
-  padding: 16px 14px 0;
-}
-.documents-header .el-button {
-  width: 100%;
-}
-.documents-header h2 {
-  margin: 20px 4px 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-regular);
-}
-.documents-list,
 .content-body {
   min-height: 0;
   flex: 1;
   overflow: auto;
   scrollbar-gutter: stable;
 }
-.documents-list {
-  padding: 0 8px 12px 12px;
-}
-.document-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 10px 8px;
-  border-radius: 6px;
-  color: var(--el-text-color-primary);
-  text-decoration: none;
-}
-.document-row:hover,
-.document-row.router-link-exact-active {
-  background: var(--el-color-primary-light-9);
-}
-.document-row.router-link-exact-active {
-  color: var(--el-color-primary);
-}
-.document-row:focus-visible {
-  outline: 2px solid var(--el-color-primary);
-  outline-offset: -2px;
-}
-.document-icon {
-  margin-top: 2px;
-  flex: none;
-  color: var(--el-color-primary);
-}
-.document-info {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-.document-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  font-weight: 500;
-}
-.document-meta {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-.document-meta,
-.document-status,
 .list-hint {
   color: var(--el-text-color-secondary);
   font-size: 12px;
@@ -565,20 +485,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 700px) {
-  .review-workspace {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
-    gap: 10px;
-  }
-  .review-documents {
-    max-height: min(235px, 40dvh);
-  }
-  .documents-header {
-    padding-top: 12px;
-  }
-  .documents-header h2 {
-    margin-top: 10px;
-  }
   .content-header {
     padding: 13px 16px;
   }
