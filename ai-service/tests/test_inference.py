@@ -87,6 +87,31 @@ class InferenceTest(unittest.TestCase):
         self.assertEqual(response.json()["answer"], "当轮第二条法条 [1]")
         self.assertEqual([citation["document_id"] for citation in response.json()["citations"]], ["law"])
 
+    def test_qa_numbering_follows_first_valid_footnote_in_the_body(self):
+        class FootnoteModel:
+            async def ainvoke(self, _messages):
+                return AIMessage(
+                    content='{"answer":"先核对期限。[2] 再核对签收。[1] 同一条再次使用。[2][9]","citations":[1,2,3,9]}'
+                )
+
+        async def search(_query, **_context):
+            return [
+                Citation(document_id=key, knowledge_base_chunk_id=key, quoted_text="候选法条")
+                for key in ("signed", "deadline", "unused")
+            ]
+
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=FootnoteModel())
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/qa", headers=self.headers, json={"question": "要核对哪些内容？"}
+            )
+        self.assertEqual(response.status_code, 200)
+        answer = response.json()
+        self.assertEqual(answer["answer"], "先核对期限。[1] 再核对签收。[2] 同一条再次使用。[1]")
+        self.assertEqual(
+            [citation["document_id"] for citation in answer["citations"]], ["deadline", "signed"]
+        )
+
     def test_followup_only_persists_citations_from_this_turn(self):
         async def search(_query, **_context):
             return [
@@ -143,7 +168,7 @@ class InferenceTest(unittest.TestCase):
                     )
                     self.assertEqual(response.status_code, 200)
                     answer = response.json()
-                    self.assertIn("未找到直接法律依据", answer["answer"])
+                    self.assertNotIn("未找到直接法律依据", answer["answer"])
                     self.assertIn("请核对验收条款和签收记录。", answer["answer"])
                     self.assertEqual(answer["citations"], [])
 
@@ -163,6 +188,7 @@ class InferenceTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn("知识库暂不可用", response.json()["answer"])
+        self.assertNotIn("未找到直接法律依据", response.json()["answer"])
         self.assertEqual(response.json()["citations"], [])
 
     def test_qa_stream_delivers_only_answer_text_then_validated_citations(self):

@@ -15,7 +15,7 @@ from ai_service.qa.schemas import GroundedAnswer
 from ai_service.qa.state import AnswerDelta, LegalQaState
 
 logger = logging.getLogger("lawwiz.qa")
-_EVIDENCE_MISSING = "未找到直接法律依据"
+_CITATION_MARKER = re.compile(r"\[([0-9]+)\]")
 _PREVIEW_MARKERS = re.compile(r"\[[0-9]+\]|\[[0-9]*$")
 _MAX_MODEL_OUTPUT = 160_000
 
@@ -82,11 +82,7 @@ class LegalQaNodes:
         candidates = list(islice(state.get("sources", []), 5))
         next_step = "可先核对报告标出的条款和实际履行记录，再确认需要补充的材料。"
         if state.get("retrieval_unavailable") or self._llm is None:
-            reason = (
-                f"知识库暂不可用，本轮{_EVIDENCE_MISSING}。"
-                if state.get("retrieval_unavailable")
-                else f"本轮{_EVIDENCE_MISSING}。"
-            )
+            reason = "知识库暂不可用。" if state.get("retrieval_unavailable") else ""
             return {"answer": f"{prefix}{reason}{next_step}", "sources": []}
 
         messages = REPORT_FOLLOWUP_PROMPT.format_messages(
@@ -120,21 +116,21 @@ class LegalQaNodes:
             result = GroundedAnswer.model_validate_json(content)
         except ValidationError as exc:
             raise DeepSeekInvocationError("模型未返回有效的问答结果") from exc
-        text = result.answer.strip()
-        if not text:
-            raise DeepSeekInvocationError("模型返回空回答")
-        # 引用标号按保存后实际展示的顺序重排，避免引用候选 3 却只展示引用 1。
-        selected = [i for i in dict.fromkeys(result.citations) if 1 <= i <= len(candidates)]
-        cited = [candidates[i - 1] for i in selected]
-        numbers = {str(candidate): number for number, candidate in enumerate(selected, start=1)}
+        selected = {str(i): candidates[i - 1] for i in result.citations if 1 <= i <= len(candidates)}
+        numbers: dict[str, int] = {}
 
         def citation_label(match: re.Match[str]) -> str:
-            number = numbers.get(match[1])
-            return f"[{number}]" if number is not None else "（引文未核实）"
+            candidate = match[1]
+            if candidate not in selected:
+                return ""
+            number = numbers.setdefault(candidate, len(numbers) + 1)
+            return f"[{number}]"
 
-        text = re.sub(r"\[([0-9]+)\]", citation_label, text)
-        if not cited:
-            text = f"本轮{_EVIDENCE_MISSING}。\n{text}"
+        # 字典以正文首次出现顺序编号；未在正文引用的候选不写入结果。
+        text = _CITATION_MARKER.sub(citation_label, result.answer).strip()
+        if not text:
+            raise DeepSeekInvocationError("模型返回空回答")
+        cited = [selected[candidate] for candidate in numbers]
         return {"answer": prefix + text, "sources": cited, "model_name": model_name}
 
     async def _stream_model(self, messages, prefix: str, emit: AnswerDelta) -> tuple[str, str | None]:

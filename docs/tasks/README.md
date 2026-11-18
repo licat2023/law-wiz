@@ -9,3 +9,4 @@
 | T20261118-01 | 独立 AI 服务与 Java 业务后端迁移 | [实施记录](T20261118-01-spring-backend-migration.md) | 主 agent | 已完成 |
 | T20261118-02 | 法律问答报告选择与个人中心精简 | [实施记录](T20261118-02-qa-report-selection.md) | 主 agent | 已完成 |
 | T20261118-03 | 法律问答流式输出 | [实施记录](T20261118-03-qa-streaming.md) | 主 agent | 已完成 |
+| T20261118-04 | 法律助手答复与正文脚注 | [实施记录](T20261118-04-qa-assistant-footnotes.md) | 主 agent | 已完成 |

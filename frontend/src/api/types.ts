@@ -250,7 +250,7 @@ export interface QaMessage {
   role: 'user' | 'assistant'
   content: string
   /**
-   * 对已经返回正文的助手消息，false 表示未找到直接法律依据（05-接口设计 §5.6）。
+   * 对完成的助手消息，表示是否附有本轮法条引用（05-接口设计 §5.6）。
    */
   has_citation: boolean
   citations?: QaCitation[]

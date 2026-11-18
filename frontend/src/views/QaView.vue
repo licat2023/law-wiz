@@ -6,7 +6,7 @@
  * 1. E-04 预分配助手消息 ID，E-06 发布临时正文，E-03 提供保存后的回答和引文；
  * 2. 必须携带 Idempotency-Key；失败不自动重试（§6.2），用户重新发起
  *    即新的操作、用新的键；
- * 3. has_citation === false 时必须显式提示"未找到直接法律依据，仅供参考"；
+ * 3. 正式助手消息的 `[编号]` 与引用快照对应，生成中只显示正文；
  * 4. 订阅中断时用 E-03 取回结果，等待回答期间同一页面只处理一条问答。
  */
 import { Loading } from '@element-plus/icons-vue'
@@ -30,12 +30,18 @@ const POLL_INTERVALS = [1000, 2000, 3000, 5000]
 const POLL_TIMEOUT = 90_000
 const MESSAGE_PAGE_SIZE = 50
 const REPORT_PAGE_SIZE = 100
+const QA_INTRO = '可以帮你读合同条款、梳理纠纷、准备材料，或追问审查报告'
+const REPORT_ANSWER_SEPARATOR = '\n\n本轮依据与建议\n'
+const LEGACY_EVIDENCE_NOTICE = /^(知识库暂不可用，)?本轮未找到直接法律依据。[ \t]*(?:\r?\n)?/
 
 interface DisplayMessage extends QaMessage {
   /** 等待最终校验和保存时收到的正文。 */
   partial?: string
-  /** 轮询超时占位，不算"未找到依据" */
-  timedOut?: boolean
+}
+
+interface AnswerPart {
+  text: string
+  citation?: number
 }
 
 const sessions = ref<QaSession[]>([])
@@ -88,6 +94,40 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+/** 旧提示只在展示时去掉，报告背景内的编号保留为正文。 */
+function answerParts(message: QaMessage): AnswerPart[] {
+  const separator = message.content.startsWith('报告原有分析\n')
+    ? message.content.indexOf(REPORT_ANSWER_SEPARATOR)
+    : -1
+  const bodyStart = separator < 0 ? 0 : separator + REPORT_ANSWER_SEPARATOR.length
+  const body = message.content
+    .slice(bodyStart)
+    .replace(LEGACY_EVIDENCE_NOTICE, (_notice, outage) => (outage ? '知识库暂不可用。' : ''))
+  const parts: AnswerPart[] = bodyStart ? [{ text: message.content.slice(0, bodyStart) }] : []
+  const count = message.citations?.length ?? 0
+  for (const text of body.split(/(\[[1-9]\d*\])/)) {
+    if (!text) continue
+    const match = /^\[([1-9]\d*)\]$/.exec(text)
+    const number = match ? Number(match[1]) : 0
+    parts.push(number > 0 && number <= count ? { text, citation: number } : { text })
+  }
+  return parts
+}
+
+function footnoteId(messageId: string, number: number) {
+  return `qa-note-${messageId}-${number}`
+}
+
+/** 展开并聚焦当前消息内的对应法条。 */
+function showFootnote(messageId: string, number: number) {
+  const note = document.getElementById(footnoteId(messageId, number))
+  const details = note?.closest('details')
+  if (!note || !details) return
+  details.open = true
+  note.focus({ preventScroll: true })
+  note.scrollIntoView({ block: 'nearest' })
+}
+
 /** 读取已保存的结果。订阅结束或断开后首次立即读取，未完成时递增等待。 */
 async function waitForAnswer(
   sessionId: string,
@@ -137,7 +177,6 @@ async function settleAnswer(sessionId: string, placeholder: DisplayMessage, page
     ...placeholder,
     partial: undefined,
     content: '（回答耗时较长，请稍后重新打开会话查看）',
-    timedOut: true,
   }
 }
 
@@ -398,29 +437,35 @@ onMounted(async () => {
                 <span v-else class="thinking">正在生成回答</span>
                 <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
               </template>
+              <template v-else-if="m.role === 'assistant'">
+                <template v-for="(part, i) in answerParts(m)" :key="i">
+                  <sup v-if="part.citation" class="cite-ref">
+                    <a
+                      :href="`#${footnoteId(m.message_id, part.citation)}`"
+                      :aria-label="`查看法律依据 ${part.citation}`"
+                      @click.prevent="showFootnote(m.message_id, part.citation)"
+                      >{{ part.text }}</a
+                    >
+                  </sup>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </template>
               <template v-else>{{ m.content }}</template>
-
-              <div
-                v-if="
-                  m.role === 'assistant' &&
-                  m.content &&
-                  !m.timedOut &&
-                  !m.has_citation &&
-                  !m.content.includes('未找到直接法律依据')
-                "
-                class="no-cite"
-              >
-                提示：本条回答未找到直接法律依据，仅供参考
-              </div>
 
               <details v-if="m.citations?.length" class="citations">
                 <summary>法律依据（{{ m.citations.length }}）</summary>
-                <div v-for="(c, i) in m.citations" :key="i" class="citation">
-                  <p class="cite-head">
-                    [{{ i + 1 }}] {{ c.law_name || '未知法规' }} {{ c.article_no }}
-                  </p>
-                  <p v-if="c.quoted_text" class="cite-text">{{ c.quoted_text }}</p>
-                </div>
+                <ol class="citation-list">
+                  <li
+                    v-for="(c, i) in m.citations"
+                    :id="footnoteId(m.message_id, i + 1)"
+                    :key="i"
+                    class="citation"
+                    tabindex="-1"
+                  >
+                    <p class="cite-head">{{ c.law_name || '未知法规' }} {{ c.article_no }}</p>
+                    <p v-if="c.quoted_text" class="cite-text">{{ c.quoted_text }}</p>
+                  </li>
+                </ol>
               </details>
 
               <div v-if="m.role === 'assistant' && m.model_name" class="msg-meta">
@@ -432,15 +477,13 @@ onMounted(async () => {
           <el-empty
             v-if="messages.length === 0"
             :description="
-              currentSession.review_context
-                ? '可以询问如何处置风险，或怎样修改相关条款'
-                : '输入法律问题开始对话'
+              currentSession.review_context ? '可以询问如何处置风险，或怎样修改相关条款' : QA_INTRO
             "
             :image-size="80"
           />
         </div>
       </template>
-      <el-empty v-else class="chat-start" description="输入法律问题开始对话" :image-size="80" />
+      <el-empty v-else class="chat-start" :description="QA_INTRO" :image-size="80" />
 
       <div
         v-if="
@@ -606,10 +649,18 @@ onMounted(async () => {
 .thinking {
   margin-right: 6px;
 }
-.no-cite {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #e6a23c;
+.cite-ref {
+  margin-inline: 1px;
+  line-height: 0;
+  font-size: 0.75em;
+}
+.cite-ref a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+.cite-ref a:hover,
+.cite-ref a:focus-visible {
+  text-decoration: underline;
 }
 .citations {
   margin-top: 8px;
@@ -620,8 +671,17 @@ onMounted(async () => {
   cursor: pointer;
   font-size: 13px;
 }
+.citation-list {
+  margin: 0;
+  padding-inline-start: 24px;
+}
 .citation {
   margin-top: 8px;
+  border-radius: 3px;
+}
+.citation:focus {
+  outline: 2px solid var(--el-color-primary-light-5);
+  outline-offset: 3px;
 }
 .cite-head {
   margin: 0;
