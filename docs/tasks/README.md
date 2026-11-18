@@ -10,3 +10,4 @@
 | T20261118-02 | 法律问答报告选择与个人中心精简 | [实施记录](T20261118-02-qa-report-selection.md) | 主 agent | 已完成 |
 | T20261118-03 | 法律问答流式输出 | [实施记录](T20261118-03-qa-streaming.md) | 主 agent | 已完成 |
 | T20261118-04 | 法律助手答复与正文脚注 | [实施记录](T20261118-04-qa-assistant-footnotes.md) | 主 agent | 已完成 |
+| T20261118-05 | 风险报告原文与法条联调 | [实施记录](T20261118-05-review-clause-excerpts/) | 主 agent | 已完成 |

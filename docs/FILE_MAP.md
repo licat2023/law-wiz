@@ -27,4 +27,4 @@
 | `docs/`、`docs/adr/` | 需求、设计、接口和架构决策 |
 | `docs/assets/`、`tools/` | 文档插图、图源与渲染脚本 |
 | `tools/legal-corpus/` | 公开法规采集、Docling 转换和知识库写入命令 |
-| `docs/tasks/` | 可恢复任务的总索引和实施记录 |
+| `docs/tasks/` | 可恢复任务的总索引、实施记录及对应的验收样本 |

@@ -40,8 +40,9 @@ class ReviewPdf {
                 for (var risk : risks) {
                     page.line(++number + ". " + risk.path("clause_title").asString("未命名条款"), 13);
                     page.line("级别：" + riskLabel(risk.path("risk_level").asString("")), 11);
+                    String excerpt = risk.path("clause_text").asString("");
+                    page.line("合同原文：" + (excerpt.isBlank() ? "未定位到可核对的原文" : excerpt), 11);
                     page.line("风险：" + risk.path("description").asString(""), 11);
-                    writeIfPresent(page, "条款原文：", risk.path("clause_text").asString(""));
                     writeIfPresent(page, "修改建议：", risk.path("suggestion").asString(""));
                     writeIfPresent(page, "依据：", risk.path("legal_basis").asString(""));
                 }

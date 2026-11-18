@@ -269,7 +269,13 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
             </el-tag>
           </div>
 
-          <blockquote v-if="rp.clause_text" class="clause-text">{{ rp.clause_text }}</blockquote>
+          <div class="clause-source">
+            <div class="clause-label">合同原文</div>
+            <blockquote v-if="rp.clause_text?.trim()" class="clause-text">
+              {{ rp.clause_text }}
+            </blockquote>
+            <p v-else class="clause-missing">未定位到可核对的原文</p>
+          </div>
 
           <p class="risk-desc">{{ rp.description }}</p>
           <p v-if="rp.suggestion" class="risk-suggestion">修改建议：{{ rp.suggestion }}</p>
@@ -346,13 +352,30 @@ const grouped = computed<Record<RiskLevel, RiskPoint[]>>(() => {
   font-weight: 600;
   color: #333;
 }
-.clause-text {
-  margin: 8px 0;
-  padding: 8px 12px;
+.clause-source {
+  margin: 10px 0;
+  padding: 10px 12px;
   border-left: 3px solid #dcdfe6;
   background: #f7f8fa;
-  color: #666;
+  color: var(--el-text-color-regular);
   font-size: 13px;
+}
+.clause-label {
+  margin-bottom: 4px;
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+.clause-text,
+.clause-missing {
+  margin: 0;
+  line-height: 1.6;
+}
+.clause-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.clause-missing {
+  color: var(--el-text-color-secondary);
 }
 .risk-desc {
   margin: 8px 0 4px;

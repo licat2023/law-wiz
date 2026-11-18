@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -10,6 +11,7 @@ from ai_service.citations import Citation
 from ai_service.config import Settings
 from ai_service.errors import InferenceError
 from ai_service.main import create_app
+from ai_service.review.schemas import ContractTerms
 
 
 class TranscriptModel:
@@ -42,13 +44,91 @@ class InferenceTest(unittest.TestCase):
         response = self.client.post(
             "/internal/review",
             headers=self.headers,
-            json={"plain_text": "合同条款", "risk_rules": [{"risk_level": "low", "description": "验收"}]},
+            json={
+                "plain_text": "合同条款",
+                "risk_rules": [{"risk_level": "low", "description": "验收", "clause_text": "条款"}],
+            },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["extracted_terms"], {"text_length": 4})
-        self.assertEqual(response.json()["risk_points"][0]["source_type"], "rule")
+        point = response.json()["risk_points"][0]
+        self.assertEqual(point["source_type"], "rule")
+        self.assertEqual((point["clause_text"], point["char_start"], point["char_end"]), ("条款", 2, 4))
         self.assertEqual(
             self.calls, [("合同条款", {"request_id": "fixture-request", "trace_id": "fixture-trace"})]
+        )
+
+    def test_review_verifies_excerpts_and_uses_only_law_material(self):
+        review_prompts = []
+
+        class ReviewModel:
+            def with_structured_output(self, schema, *, method):
+                async def answer(prompt):
+                    if schema is ContractTerms:
+                        return schema()
+                    review_prompts.append(prompt)
+                    risks = [
+                        {
+                            "description": "检验时限过短",
+                            "source_type": "retrieved_law",
+                            "clause_text": "买方须在签收后两小时内完成检验。",
+                            "char_start": 0,
+                            "char_end": 1,
+                            "citations": [{"document_id": "law", "knowledge_base_chunk_id": "clause"}],
+                        },
+                        {
+                            "description": "付款期限待补充",
+                            "source_type": "llm_inference",
+                            "clause_text": "付款期限为____日。",
+                            "legal_basis": "模型附加的未核实依据",
+                        },
+                        {
+                            "description": "改写不可当作原文",
+                            "source_type": "llm_inference",
+                            "clause_text": "付款期限为五日。",
+                            "char_start": 0,
+                            "char_end": 1,
+                        },
+                    ]
+                    return schema.model_validate(
+                        {"risk_points": [{"risk_level": "high", **risk} for risk in risks]}
+                    )
+
+                return SimpleNamespace(ainvoke=answer)
+
+        async def search(_query, **_context):
+            return [
+                Citation(
+                    document_id="sample",
+                    knowledge_base_chunk_id="template",
+                    document_type="template",
+                    quoted_text="模板联调测试文字",
+                ),
+                Citation(
+                    document_id="law",
+                    knowledge_base_chunk_id="clause",
+                    document_type="law",
+                    quoted_text="引用链路测试文段",
+                ),
+            ]
+
+        text = "测试合同🌿\n买方须在签收后\n两小时内完成检验。\n付款期限为____日。"
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=ReviewModel())
+        with TestClient(app) as client:
+            response = client.post("/internal/review", headers=self.headers, json={"plain_text": text})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("模板联调测试文字", review_prompts[0])
+        first, second, missing = response.json()["risk_points"]
+        self.assertEqual(first["legal_basis"], "引用链路测试文段")
+        self.assertIsNone(second["legal_basis"])
+        for point, original in (
+            (first, "买方须在签收后\n两小时内完成检验。"),
+            (second, "付款期限为____日。"),
+        ):
+            self.assertEqual(point["clause_text"], original)
+            self.assertEqual(text[point["char_start"] : point["char_end"]], original)
+        self.assertEqual(
+            (missing["clause_text"], missing["char_start"], missing["char_end"]), (None, None, None)
         )
 
     def test_qa_requires_a_service_token_and_accepts_report_context(self):
