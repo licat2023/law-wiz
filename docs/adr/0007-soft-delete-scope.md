@@ -9,7 +9,7 @@
 **决策**：
 
 1. **`user` 表采用硬删除**：`phone` / `email` 用普通唯一索引 `uk_user_phone(phone)`、`uk_user_email(email)` 保证唯一。
-2. **仅需要保留历史的表使用 `deleted_at`**：`contract`、`contract_version`、`review_task`、`kb_document`、`qa_session`、`file_object`。
+2. **仅需要保留历史的表使用 `deleted_at`**。业务表包括 `contract`、`review_task`、`qa_session`、`file_object`。旧设计中的 `knowledge_base_document` 属于业务库语料表，当前语料表 `kb_document` 由独立知识库管理。合同版本以只增不改的方式保留历史。
 3. 所有表的唯一索引**一律建立在业务列上，不得包含 `deleted_at`**。
 
 ## 实测证据（2026-09-13，MySQL 8.0.46）
