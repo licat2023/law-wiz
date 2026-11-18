@@ -147,7 +147,7 @@ class QaService {
                         BigInteger answerId, String question, String requestId) {
         try {
             var session = owned(owner, mapper.find(sessionId));
-            var report = reports.load(owner, session.reviewTaskId(), session.riskPointId());
+            var report = reports.loadForAnswer(owner, session.reviewTaskId(), session.riskPointId());
             Map<String, Object> payload = new HashMap<>();
             payload.put("question", question);
             if (report != null) {

@@ -23,8 +23,8 @@ class LegalQaInput(BaseModel):
     history: list[RecentTurnMessage] = Field(default_factory=list, max_length=6)
 
 
-class FollowupAnswer(BaseModel):
-    """模型输出的建议和实际使用的当轮候选编号。"""
+class GroundedAnswer(BaseModel):
+    """模型的答复正文和实际使用的当轮候选编号。"""
 
     answer: str = Field(min_length=1, max_length=12000)
     citations: list[StrictInt] = Field(max_length=5, strict=True)

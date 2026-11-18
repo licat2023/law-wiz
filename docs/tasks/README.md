@@ -7,3 +7,4 @@
 | T20261116-01 | AI 与 RAG 后续实施 | [实施记录](T20261116-01-ai-rag.md) | 主 agent | 已完成 |
 | T20261116-02 | 前端镜像与全容器部署 | [实施记录](T20261116-02-frontend-containers.md) | 主 agent | 已完成 |
 | T20261118-01 | 独立 AI 服务与 Java 业务后端迁移 | [实施记录](T20261118-01-spring-backend-migration.md) | 主 agent | 已完成 |
+| T20261118-02 | 法律问答报告选择与个人中心精简 | [实施记录](T20261118-02-qa-report-selection.md) | 主 agent | 已完成 |

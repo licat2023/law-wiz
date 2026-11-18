@@ -85,6 +85,7 @@ class KnowledgeBaseSearch:
             seen_articles = set()
             for hit in data.items:
                 quoted_text = hit.parent_content or hit.content
+                document_type = hit.metadata.get("doc_type")
                 if hit.article_chunk_id:
                     quoted_text = data.article_contents[hit.article_chunk_id]
                     if not quoted_text.strip():
@@ -104,6 +105,7 @@ class KnowledgeBaseSearch:
                         article_no=hit.metadata.get("article_no"),
                         quoted_text=quoted_text,
                         relevance_score=hit.score,
+                        document_type=document_type if isinstance(document_type, str) else None,
                     )
                 )
             return citations

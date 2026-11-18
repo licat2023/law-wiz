@@ -2,6 +2,7 @@ package com.lawwiz.business.review;
 
 import java.math.BigInteger;
 import java.util.LinkedHashSet;
+import java.util.List;
 
 import com.lawwiz.business.api.ApiError;
 import com.lawwiz.business.api.ApiValues;
@@ -12,8 +13,12 @@ import tools.jackson.databind.ObjectMapper;
 /** Resolve report follow-up context while enforcing user, task and risk ownership. */
 @Service
 public class ReportContexts {
+    /** A short report finding without the original contract or citation snapshot. */
+    public record Finding(String riskLevel, String title, String description, String suggestion) {}
+
     public record Context(String contractTitle, String summary, String riskLabel, String riskDescription,
-                          String clauseText, String originalReference, String sourceType, boolean isDismissed) {}
+                          String clauseText, String originalReference, String sourceType, boolean isDismissed,
+                          List<Finding> findings) {}
 
     private final ReportContextMapper reports;
     private final ObjectMapper json;
@@ -24,6 +29,15 @@ public class ReportContexts {
     }
 
     public Context load(BigInteger owner, BigInteger taskId, BigInteger riskId) {
+        return load(owner, taskId, riskId, false);
+    }
+
+    /** Include a bounded list of active findings when answering about the whole report. */
+    public Context loadForAnswer(BigInteger owner, BigInteger taskId, BigInteger riskId) {
+        return load(owner, taskId, riskId, true);
+    }
+
+    private Context load(BigInteger owner, BigInteger taskId, BigInteger riskId, boolean includeFindings) {
         if (taskId == null) {
             return null;
         }
@@ -45,7 +59,8 @@ public class ReportContexts {
         }
         String summary = ApiValues.limit(report.summary(), 800);
         if (riskId == null) {
-            return new Context(report.contractTitle(), summary, null, null, null, null, null, false);
+            var findings = includeFindings ? reports.findings(taskId) : List.<Finding>of();
+            return new Context(report.contractTitle(), summary, null, null, null, null, null, false, findings);
         }
         var risk = reports.risk(taskId, riskId);
         if (risk == null) {
@@ -56,7 +71,7 @@ public class ReportContexts {
             label = risk.riskCategory() == null ? "风险项 #" + riskId : risk.riskCategory();
         }
         return new Context(report.contractTitle(), summary, label, ApiValues.limit(risk.description(), 800),
-                ApiValues.limit(risk.clauseText(), 1200), references(risk), risk.sourceType(), risk.dismissed());
+                ApiValues.limit(risk.clauseText(), 1200), references(risk), risk.sourceType(), risk.dismissed(), List.of());
     }
 
     private String references(ReportContextMapper.Risk risk) {

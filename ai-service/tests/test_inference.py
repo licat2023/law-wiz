@@ -17,7 +17,7 @@ class TranscriptModel:
 
     async def ainvoke(self, messages):
         transcript = "\n".join(message.content for message in messages)
-        details = ["报告原有证据", "上一轮问题", "当轮第二条法条"]
+        details = ["报告原有证据", "上一轮问题", "当轮第二条法条", "核对交付款项"]
         found = " ".join(part for part in details if part in transcript)
         return AIMessage(content=json.dumps({"answer": found + " [2]", "citations": [2]}))
 
@@ -60,6 +60,33 @@ class InferenceTest(unittest.TestCase):
         self.assertIn("测试摘要", response.json()["answer"])
         self.assertEqual(response.json()["citations"], [])
 
+    def test_ordinary_qa_without_model_does_not_present_search_hits_as_evidence(self):
+        async def search(_query, **_context):
+            return [
+                Citation(document_id="sample", knowledge_base_chunk_id="sample", quoted_text="开发联调样本")
+            ]
+
+        app = create_app(Settings(allow_fake_model=True, service_token="fixture-key"), search_laws=search)
+        with TestClient(app) as client:
+            response = client.post("/internal/qa", headers=self.headers, json={"question": "如何签收？"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("法律问答暂不可用", response.json()["answer"])
+        self.assertEqual(response.json()["citations"], [])
+
+    def test_ordinary_qa_persists_only_the_source_the_model_used(self):
+        async def search(_query, **_context):
+            return [
+                Citation(document_id="sample", knowledge_base_chunk_id="sample", quoted_text="开发联调样本"),
+                Citation(document_id="law", knowledge_base_chunk_id="law", quoted_text="当轮第二条法条"),
+            ]
+
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=TranscriptModel())
+        with TestClient(app) as client:
+            response = client.post("/internal/qa", headers=self.headers, json={"question": "如何签收？"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], "当轮第二条法条 [1]")
+        self.assertEqual([citation["document_id"] for citation in response.json()["citations"]], ["law"])
+
     def test_followup_only_persists_citations_from_this_turn(self):
         async def search(_query, **_context):
             return [
@@ -78,14 +105,47 @@ class InferenceTest(unittest.TestCase):
                         "contract_title": "合同",
                         "summary": "摘要",
                         "original_reference": "报告原有证据",
+                        "findings": [{"risk_level": "high", "description": "核对交付款项"}],
                     },
                     "history": [{"role": "user", "content": "上一轮问题"}],
                 },
             )
         self.assertEqual(response.status_code, 200)
         answer = response.json()
-        self.assertIn("报告原有证据 上一轮问题 当轮第二条法条 [1]", answer["answer"])
+        self.assertIn("报告原有证据 上一轮问题 当轮第二条法条 核对交付款项 [1]", answer["answer"])
         self.assertEqual([citation["document_id"] for citation in answer["citations"]], ["two"])
+
+    def test_qa_excludes_templates_and_can_answer_without_legal_sources(self):
+        class ChecklistModel:
+            async def ainvoke(self, messages):
+                if any("开发联调样本文本" in message.content for message in messages):
+                    return AIMessage(content='{"answer":"开发联调样本 [1]","citations":[1]}')
+                return AIMessage(content='{"answer":"请核对验收条款和签收记录。","citations":[]}')
+
+        async def search(_query, **_context):
+            return [
+                Citation(
+                    document_id="template",
+                    knowledge_base_chunk_id="sample",
+                    document_type="template",
+                    quoted_text="开发联调样本文本",
+                ),
+            ]
+
+        app = create_app(Settings(service_token="fixture-key"), search_laws=search, model=ChecklistModel())
+        with TestClient(app) as client:
+            for report in (None, {"contract_title": "合同", "summary": "摘要"}):
+                with self.subTest(report=report):
+                    response = client.post(
+                        "/internal/qa",
+                        headers=self.headers,
+                        json={"question": "如何签收？", "report": report},
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    answer = response.json()
+                    self.assertIn("未找到直接法律依据", answer["answer"])
+                    self.assertIn("请核对验收条款和签收记录。", answer["answer"])
+                    self.assertEqual(answer["citations"], [])
 
     def test_knowledge_base_outage_distinguishes_ordinary_and_report_qa(self):
         async def search(_query, **_context):
