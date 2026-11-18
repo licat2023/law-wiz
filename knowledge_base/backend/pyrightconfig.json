@@ -4,5 +4,4 @@
   "extraPaths": ["."],
   "venvPath": ".",
   "venv": ".venv",
-  "typeCheckingMode": "standard"
 }
