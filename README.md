@@ -63,12 +63,12 @@
 | [docs/01-需求说明书.md](docs/01-需求说明书.md) | 《智法宝》项目需求说明书：功能需求、非功能需求、运行环境与里程碑 |
 | [docs/02-技术栈.md](docs/02-技术栈.md) | 全生命周期技术栈：各层次已确认的落地选型 |
 | [docs/03-概要设计.md](docs/03-概要设计.md) | 系统分层架构、模块分解与交付边界、数据设计、关键设计、部署拓扑、团队分工 |
-| [docs/04-数据库设计.md](docs/04-数据库设计.md) | 持久化边界与旧库 DDL 参考；当前建表以各服务 ORM 为准 |
+| [docs/04-数据库设计.md](docs/04-数据库设计.md) | 持久化边界、现行建表入口与一期数据模型 |
 | [docs/05-接口设计.md](docs/05-接口设计.md) | 一期全部接口的完整契约、统一响应体与错误码、用户令牌鉴权、异步任务轮询规则、外部能力接入约定 |
 | [docs/06-MVP演示指南.md](docs/06-MVP演示指南.md) | P1 答辩演示顺序、架构说明、预期结果与已知边界 |
 | [deploy/README.md](deploy/README.md) | 开发及生产 Compose、空库初始化和站点配置 |
-| [docs/07-v0.3.0开发记录.md](docs/07-v0.3.0开发记录.md) | v0.3.0 发布时的实现与演进记录 |
-| [docs/FILE_MAP.md](docs/FILE_MAP.md) | 当前目录职责、施工范围与验收结果 |
+| [docs/FILE_MAP.md](docs/FILE_MAP.md) | 当前目录与文件职责 |
+| [任务总索引](docs/tasks/README.md) | 任务实施与验收记录 |
 | [docs/adr/](docs/adr/) | 架构决策记录：不可逆决策及其被否决的替代方案 |
 | [docs/assets/](docs/assets/) | 文档插图、架构图源码与渲染说明 |
 
@@ -77,7 +77,6 @@
 ```text
 law-wiz/
 ├── backend-java/     # Spring Boot 业务后端
-├── backend/          # 旧业务 FastAPI，用于迁移对照与回退
 ├── ai-service/       # 独立运行合同审查和法律问答 Agent
 ├── frontend/         # 智法宝用户端
 ├── knowledge_base/
@@ -94,7 +93,7 @@ law-wiz/
 
 按 [部署说明](deploy/README.md) 启动应用。使用 [知识库管理后台](knowledge_base/README.md) 创建库并上传 Demo 语料，再为业务后端和 AI 服务设置默认知识库与只读凭证。模型和嵌入可分别启用开发替身。
 
-业务后端启动和检查命令见 [后端说明](backend/README.md)，演示链路见 [Demo 指南](docs/06-MVP演示指南.md)。
+业务后端启动和检查命令见 [后端说明](backend-java/README.md)，演示链路见 [Demo 指南](docs/06-MVP演示指南.md)。
 
 ## 协作约定
 

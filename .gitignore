@@ -67,7 +67,6 @@ conf/ca.crt
 # --- 模型权重（体积大，不入库）---
 # 仅忽略根目录的权重目录。`models/` 会匹配任意层级的同名目录，可能遗漏应用源码。
 /models/
-!backend/app/models/
 *.bin
 *.safetensors
 *.gguf

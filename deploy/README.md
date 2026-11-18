@@ -54,7 +54,9 @@ docker compose -f docker-compose.prod.yml up -d --wait
 
 MySQL 镜像以 `mysql:9.7` 为底镜像并内置初始化脚本。首次启动创建业务表和独立知识库账号，已有数据库卷跳过初始化。新业务文件使用 `lawwiz-rustfs`。原业务文件保留在 `lawwiz-data`，知识库原文件和 Chroma 位于 `lawwiz-kb-data`，关系库位于 `lawwiz-mysql`。
 
-已有数据库升级时，先按业务后端说明审核并执行报告追问迁移 SQL，再按知识库说明创建关键词表。知识库构建成功后，可以在本目录用一次性容器访问内部数据库，先以 `--schema-sql` 审核，再以 `--create-tables` 应用结构变更。知识库启动后用同一命令入口和 `--knowledge-base <库ID>` 分批排入重建任务。[业务后端说明](../backend/README.md) · [知识库升级](../knowledge_base/README.md#已有库升级)
+已有业务库升级前先备份并检查表结构。若 `qa_session` 尚缺报告关联列，审核并执行[报告追问迁移 SQL](migrations/20261116-qa-report-followup.sql)。若审查归档字段尚未建立，按下方说明应用归档迁移。新库由 MySQL 初始化镜像创建所需字段。
+
+已有知识库按[知识库升级说明](../knowledge_base/README.md#已有库升级)创建关键词表。先用 `--schema-sql` 审核，再用 `--create-tables` 应用结构变更。知识库启动后用 `--knowledge-base <库ID>` 分批排入重建任务。
 
 部署审查文档归档功能前，在已有的业务数据库执行一次 [归档升级 SQL](migrations/20261119-review-archive.sql)。该脚本应在报告追问升级之后运行。新数据库卷由初始化脚本直接建出所需字段和索引。
 
@@ -65,9 +67,9 @@ docker compose -f docker-compose.prod.yml run --rm --no-deps knowledge-base \
 
 Compose 默认启用混合检索。可通过部署 `.env` 的 `KB_RETRIEVAL_STRATEGY` 选择向量、混合或重排。重排服务按目标环境的资源预算独立部署，完整端点和调用限制通过 `KB_RERANK_*` 配置。
 
-## 迁移或回退业务文件
+## 将已有业务文件迁移至 RustFS
 
-在同一 Compose 项目保留 MySQL 与旧业务文件卷。备份数据库和旧文件，保存旧版 Compose 配置、环境和业务镜像标签。暂停上传及新审查，等待在途业务任务结束后停止业务容器。核对旧卷可读，配置 RustFS 凭据并启动数据服务。迁移命令按文件记录读取，逐个核对大小和 SHA-256，复制后重新读取校验。全部验证通过才更新数据库定位。命令逐条输出 JSON 结果，最后报告验证与切换数量，可保存日志用于比对。
+在同一 Compose 项目保留 MySQL 与旧业务文件卷。备份数据库和旧文件。暂停上传及新审查，等待在途业务任务结束后停止业务容器。核对旧卷可读，配置 RustFS 凭据并启动数据服务。迁移命令按文件记录读取，逐个核对大小和 SHA-256，复制后重新读取校验。全部验证通过才更新数据库定位。命令逐条输出 JSON 结果，最后报告验证与切换数量，可保存日志用于比对。
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --wait mysql redis rustfs
@@ -76,16 +78,6 @@ docker compose -f docker-compose.prod.yml run --rm --no-deps backend --lawwiz.fi
 docker compose -f docker-compose.prod.yml run --rm --no-deps backend --lawwiz.file-migration=copy
 docker compose -f docker-compose.prod.yml up -d --wait
 ```
-
-回退前同样暂停写入并停业务容器。以下命令以旧业务服务的用户身份挂载可写旧文件卷，将 RustFS 文件回补到旧路径并核对后更新数据库定位。用实际 Compose 项目名对应的旧卷替换例子中的卷名。定位都回到 `local` 后，才切回旧业务镜像。两份对象数据保留至回退窗口结束。
-
-```bash
-docker compose -f docker-compose.prod.yml run --rm --no-deps \
-  -e LAWWIZ_STORAGE_LOCAL_ROOT=/app/.rollback \
-  -v lawwiz_lawwiz-data:/app/.rollback:rw backend --lawwiz.file-migration=rollback
-```
-
-让保存的旧版编排引用备份的 Python 镜像标签，沿用原来的 Compose 项目名，再用 `up -d --no-deps --no-build --pull never --wait backend` 只切回业务后端。通过业务站点核对登录、旧报告和回退前新增的报告均可读取。
 
 ## 站点与健康检查
 

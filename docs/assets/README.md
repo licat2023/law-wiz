@@ -6,8 +6,8 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| [`fig-architecture.mmd`](fig-architecture.mmd) | 当前 Demo 的架构图源码，修改后重新渲染 PNG 与 SVG |
-| `fig-architecture.png`、`fig-architecture.svg` | 分别供需求说明书和概要设计引用 |
+| [`fig-demo-architecture.mmd`](fig-demo-architecture.mmd) | 当前 Demo 的架构图源码，修改后重新渲染 PNG 与 SVG |
+| `fig-demo-architecture.png`、`fig-demo-architecture.svg` | 分别供需求说明书和概要设计引用 |
 | `fig-m2-*`、`fig-m4-*`、`fig-m6-*`、`fig-m7-*` | 需求说明书引用的业务流程图，仅有位图 |
 
 ## 渲染方法
@@ -27,10 +27,10 @@ $env:MERMAID_DIR = "<该目录的绝对路径>"
 ```powershell
 # 在仓库根目录（law-wiz/）执行
 $env:MERMAID_DIR = "<含 node_modules/mermaid 的目录>"
-node tools/render-mmd.mjs docs/assets/fig-architecture.mmd docs/assets/fig-architecture 2400
+node tools/render-mmd.mjs docs/assets/fig-demo-architecture.mmd docs/assets/fig-demo-architecture 2400
 ```
 
-产出 `fig-architecture.png` 与 `fig-architecture.svg`。
+产出 `fig-demo-architecture.png` 与 `fig-demo-architecture.svg`。
 
 ### 环境变量
 

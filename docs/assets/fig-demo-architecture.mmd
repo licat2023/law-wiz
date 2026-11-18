@@ -1,0 +1,19 @@
+%% 当前 Demo 架构。修改后重新渲染同名 PNG/SVG。
+flowchart TB
+  WEB["智法宝用户端 · Vue"] --> BUSINESS
+  ADMIN["知识库管理端 · Vue"] --> KB
+
+  BUSINESS["业务后端 · Spring Boot<br/>鉴权、文件、合同审查与法律问答"]
+  AI["独立 AI 服务 · FastAPI<br/>合同审查与法律问答 Agent"]
+  KB["独立知识库 · FastAPI<br/>文档管理、索引与检索"]
+
+  BUSINESS -->|内部 HTTP| AI
+  AI -->|只读检索| KB
+  AI --> MODEL["生成模型"]
+  KB --> EMBED["嵌入服务"]
+
+  BUSINESS --> BDB[("业务 MySQL")]
+  BUSINESS --> REDIS[("Redis")]
+  BUSINESS --> RUSTFS[("RustFS 合同与报告")]
+  KB --> KDB[("知识库 MySQL")]
+  KB --> KBDATA[("原文件与 Chroma")]

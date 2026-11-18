@@ -15,3 +15,4 @@
 | T20261119-01 | 审查文档归档管理 | [实施记录](T20261119-01-review-archive.md) | 主 agent | 已完成 |
 | T20261119-02 | 法律问答归档管理 | [实施记录](T20261119-02-qa-archive.md) | 主 agent | 已完成 |
 | T20261119-03 | 统一业务侧栏与移除重复审查记录 | [实施记录](T20261119-03-workspace-sidebars.md) | 主 agent | 已完成 |
+| T20261119-04 | 退役 Python 业务后端与整理主分支 | [实施记录](T20261119-04-retire-python-backend.md) | 主 agent | 已完成 |

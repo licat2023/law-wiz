@@ -14,7 +14,6 @@ Spring Boot 业务后端负责用户、文件、审查和问答状态，通过 M
 | 目录 | 职责 |
 | --- | --- |
 | `backend-java/` | Spring Boot 业务后端及文件迁移命令 |
-| `backend/` | 旧业务 FastAPI，供迁移对照与回退 |
 | `ai-service/` | 独立推理服务，运行合同审查与法律问答 Agent |
 | `frontend/` | 智法宝用户界面 |
 | `knowledge_base/backend/` | 知识库 FastAPI、文档入库、索引和检索 |
@@ -46,32 +45,19 @@ Java 后端执行 `mvn -B -ntp package`，用 Java 21 构建。Python 项目使�
   容器会被 OOM Killer 静默杀掉，表现为"启动后无故退出"。当前不实现 OCR；后续接入只考虑云端 API。
 - **每个容器必须设 `mem_limit`**。部署主机内存极紧且已承载其它服务，不设上限会连带拖垮同机应用。
 - **MySQL 固定 `mysql:9.7`，不用 `latest`**。见 ADR-0008。
-- **`.gitignore` 里 `models/` 必须保持锚定为 `/models/`**。写成不带斜杠的 `models/` 会连带忽略
-  `backend/app/models/`，使克隆下来的仓库缺少整个数据层。见下方"验证纪律"。
+- **模型权重忽略规则使用根路径 `/models/`**，以免误忽略应用中同名的源码目录。
 - **唯一索引不得包含 `deleted_at`**：MySQL 唯一索引不约束 `NULL`。见 ADR-0007。
 - **接口中的 ID 一律按字符串处理**，前端不得参与算术（后端为 BIGINT UNSIGNED，超出 JS 安全整数范围）。
 - **按响应体的 `code` 判断成败**，不依赖 HTTP 状态码。
 - **AI 相关接口必须带 `Idempotency-Key`**（`POST /reviews`、`POST /qa/sessions/{id}/messages`）。
 - **同一个外部能力只在一处封装**，其它地方复用该封装。一期**不建 Provider 接口体系**
   （ADR-0012）—— 业务代码里不要出现同一个厂商 SDK 的分散调用，那会让将来真要替换时无处下手。
-- **Python 后端的数据库访问走异步栈**：`AsyncSession` + aiomysql（`infrastructure/database/session.py`），
-  路由 / 服务 / 流水线统一 `await`；**不要**引入同步 `Session`、`create_engine` 或 pymysql 驱动
-  —— 异步上下文里用同步会话会抛 `MissingGreenlet`，同步驱动会阻塞事件循环。Redis 同理，用 `redis.asyncio`。
-- **不要访问 ORM 关系属性**（`task.report`、`session.messages` 之类）：异步会话下它会触发
-  隐式 IO 抛 `MissingGreenlet`，改用显式 `select(...)` 查询。
-- **时间戳列必须同时给 Python 侧取值**（`default=` / `onupdate=`，见 `infrastructure/database/base.py`）：
-  MySQL 不支持 `INSERT ... RETURNING`，只写 `server_default` 的话，插入后读该列会触发
-  隐式 SELECT —— 异步会话里同样抛 `MissingGreenlet`，而 **SQLite 测试测不出来**
-  （SQLite 支持 RETURNING），只有连真实 MySQL 才暴露。实测：C-01 曾返回 50000 而 143 个用例全绿。
-- **Python 异步服务的同步重活使用 `asyncio.to_thread`**：bcrypt 口令哈希、PDF 解析与报告生成、向量检索、
-  同步计算与外部 SDK 调用、本地磁盘读写都已移出事件循环（`domains/auth/security.py`、各领域的
-  `service.py` / `pipeline.py`）。**新增这类调用时照做** —— 在 `async def` 里直接同步调用
-  会占住事件循环（期间所有请求排队），而**功能测试不会发现**。
+- **知识库数据库访问走异步栈**：使用 SQLAlchemy `AsyncSession` 与 aiomysql。显式执行查询，避免异步 ORM 关系属性触发隐式 I/O。MySQL 时间戳默认值需在 Python 侧可用，以免写入后为取值触发隐式查询。
+- **Python 异步服务的同步重活使用 `asyncio.to_thread`**，包括口令哈希、文档解析、同步向量检索、阻塞 SDK 调用及本地磁盘读写。
 
 ## 验证纪律
 
-**验证必须针对全新 clone，不能只针对工作区。** 二者可以不一致：`.gitignore` 曾误忽略
-`backend/app/models/`，导致"工作区 33 个测试全绿、克隆下来的仓库却缺少整个数据层"。
+**在干净克隆或 Git 源码快照中验证。** 工作区的未跟踪文件可能掩盖源码缺失。
 
 低成本做法：
 
@@ -97,8 +83,8 @@ git archive --format=tar HEAD | tar -x -C <临时目录>
 - **`git push` 在本机的 TLS 配置**：全局 `~/.gitconfig` 设了 `http.sslBackend = openssl`，它在本机
   连 GitHub 会失败（`unexpected eof while reading`）。本仓库已设仓库级 `schannel` 覆盖。
   克隆到新机器后若推送失败，先检查这一项。
-- **命令要在各自项目目录执行**，不要共用业务后端与知识库的 Python 环境。
-- **用 `law-wiz.code-workspace` 打开工作区**：两个后端的顶层包都叫 `app`，各自使用独立的解释器和分析范围。
+- **命令要在各自项目目录执行**，AI 服务和知识库各用自己的 Python 环境。
+- **用 `law-wiz.code-workspace` 打开工作区**：各子项目使用独立的解释器和分析范围。
 - 仓库可能公开：**凭据、主机地址、端口、连接方式一律不写入仓库**，理由见根 `README.md` 的「凭据纪律」。
 
 ## 文档权威来源

@@ -12,7 +12,7 @@
  *    从此图有源码，不再出现"只有位图改不动"的情况。
  *
  * 用法：node render-mmd.mjs <输入.mmd> <输出前缀> [宽度px]
- *   node tools/render-mmd.mjs docs/assets/fig-architecture.mmd docs/assets/fig-architecture 2400
+ *   node tools/render-mmd.mjs docs/assets/fig-demo-architecture.mmd docs/assets/fig-demo-architecture 2400
  *
  * 环境变量：
  *   MERMAID_DIR  含 node_modules/mermaid 的目录（默认取当前工作目录）

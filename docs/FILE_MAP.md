@@ -6,15 +6,9 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `backend/app/domains/auth/`、`backend/app/domains/files/` | 用户、登录、令牌及文件上传与读取 |
-| `backend/app/domains/contracts/` | 合同版本与该版本的正文 |
-| `backend/app/domains/contract_review/` | 审查任务、风险规则和报告 |
-| `backend/app/domains/legal_qa/` | 普通问答、审查报告追问和引用快照 |
-| `backend/app/api/`、`backend/app/core/` | HTTP 入口与应用公共契约 |
-| `backend/app/infrastructure/` | 数据库、存储、缓存、AI 服务与知识库连接 |
 | `ai-service/ai_service/` | AI 服务入口、模型接入、法条引用检索、审查及问答工作流 |
 | `ai-service/tests/` | 内部推理接口与引用行为验证 |
-| `backend-java/` | 默认 Spring Boot 业务后端、MyBatis 映射、RustFS 访问和迁移命令 |
+| `backend-java/` | Spring Boot 业务后端、MyBatis 映射、RustFS 访问和迁移命令 |
 | `backend-java/src/main/java/com/lawwiz/business/qa/` | 问答会话、回答与引文持久化，以及 `QaAnswerStream.java` 的生成中正文发布 |
 | `knowledge_base/backend/app/knowledge_bases/` | 库设置与访问范围 |
 | `knowledge_base/backend/app/documents/` | 文档、原文件、修订、解析与导入 |

@@ -1,8 +1,7 @@
 /**
  * M1 认证与用户接口。
  *
- * 请求和响应字段见 `backend/app/domains/auth/schemas.py`，
- * 接口编号见 05-接口设计 §5.2。
+ * 接口契约见 05-接口设计 §5.2，业务入口为 Java AuthController。
  */
 
 import { api } from './client'

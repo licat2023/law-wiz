@@ -166,7 +166,7 @@ async function settleAnswer(sessionId: string, placeholder: DisplayMessage, page
       if (!disposed && message) message.partial = (message.partial ?? '') + text
     })
   } catch {
-    // 断线或旧后端仍可从会话详情取得同一回答。
+    // 流式连接中断后继续从会话详情获取回答。
   } finally {
     window.clearTimeout(timer)
     answerStreamController = undefined
