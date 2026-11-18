@@ -4,6 +4,8 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import router from './router'
+// 页面直接调用 ElMessage，按需解析器不会为这些调用加载样式。
+import 'element-plus/es/components/message/style/css'
 import './styles/main.css'
 
 const app = createApp(App)
