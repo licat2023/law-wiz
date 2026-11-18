@@ -15,7 +15,9 @@ export function createSession(
 }
 
 /** E-02 会话列表 */
-export function listSessions(params: { page?: number; page_size?: number; status?: string } = {}) {
+export function listSessions(
+  params: { page?: number; page_size?: number; status?: QaSession['status'] } = {},
+) {
   return api.get<Page<QaSession>>('/qa/sessions', params)
 }
 
@@ -108,6 +110,16 @@ export async function streamAnswer(
 /** E-05 归档会话（**归档而非删除**，历史问答保留可查） */
 export function archiveSession(sessionId: string) {
   return api.delete<null>(`/qa/sessions/${sessionId}`)
+}
+
+/** E-07 将归档会话还原为活跃会话。 */
+export function restoreSession(sessionId: string) {
+  return api.patch<null>(`/qa/sessions/${sessionId}/restore`)
+}
+
+/** E-08 彻底删除一份归档会话及其消息与引文。 */
+export function deleteArchivedSession(sessionId: string) {
+  return api.delete<null>(`/qa/sessions/${sessionId}/permanent`)
 }
 
 /** 为一次新提问生成幂等键。同一个请求重放时沿用原键。 */

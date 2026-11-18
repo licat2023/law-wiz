@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -105,7 +106,21 @@ class QaController {
     @DeleteMapping("/{id}")
     ApiEnvelope archive(@PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
         var owner = authorize(request, response, "read", readLimit);
-        qa.archive(owner, ApiValues.id(id));
+        qa.setArchived(owner, ApiValues.id(id), true);
+        return ApiEnvelope.success(null, request);
+    }
+
+    @PatchMapping("/{id}/restore")
+    ApiEnvelope restore(@PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
+        var owner = authorize(request, response, "read", readLimit);
+        qa.setArchived(owner, ApiValues.id(id), false);
+        return ApiEnvelope.success(null, request);
+    }
+
+    @DeleteMapping("/{id}/permanent")
+    ApiEnvelope deleteArchived(@PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
+        var owner = authorize(request, response, "read", readLimit);
+        qa.deleteArchived(owner, ApiValues.id(id));
         return ApiEnvelope.success(null, request);
     }
 

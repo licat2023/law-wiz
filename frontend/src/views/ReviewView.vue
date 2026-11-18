@@ -14,7 +14,7 @@ import {
 } from '@/api/review'
 import { ApiError } from '@/api/client'
 import { ErrorCode, type ReviewListItem, type ReviewStatus, type ReviewTaskData } from '@/api/types'
-import ReviewRowActions from '@/components/ReviewRowActions.vue'
+import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
 import ReviewDetailView from './ReviewDetailView.vue'
 
 const PAGE_SIZE = 20
@@ -285,7 +285,7 @@ onUnmounted(() => {
             </span>
           </span>
         </RouterLink>
-        <div v-for="item in documents" :key="item.task_id" class="review-action-row">
+        <div v-for="item in documents" :key="item.task_id" class="archive-action-row">
           <RouterLink
             class="document-row"
             :to="{ name: 'review-detail', params: { taskId: item.task_id } }"
@@ -303,7 +303,7 @@ onUnmounted(() => {
               </span>
             </span>
           </RouterLink>
-          <ReviewRowActions
+          <ArchiveRowActions
             mode="archive"
             :busy="archiveBusy"
             @archive="archiveDocument(item.task_id)"

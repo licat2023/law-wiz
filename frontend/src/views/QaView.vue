@@ -11,7 +11,7 @@
  */
 import { Loading } from '@element-plus/icons-vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
@@ -25,6 +25,7 @@ import {
 } from '@/api/qa'
 import { listReviews } from '@/api/review'
 import type { QaMessage, QaSession, ReviewListItem } from '@/api/types'
+import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
 
 const POLL_INTERVALS = [1000, 2000, 3000, 5000]
 const POLL_TIMEOUT = 90_000
@@ -182,7 +183,7 @@ async function settleAnswer(sessionId: string, placeholder: DisplayMessage, page
 
 async function loadSessionList() {
   try {
-    const page = await listSessions({ page: 1, page_size: 50 })
+    const page = await listSessions({ page: 1, page_size: 50, status: 'active' })
     sessions.value = page.items
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载会话列表失败')
@@ -280,12 +281,13 @@ async function newChat() {
   await router.replace({ name: 'qa' })
 }
 
-/** E-05：归档（而非删除） */
+/** E-05：将会话移到个人中心的归档管理。 */
 async function archive(s: QaSession) {
   if (waiting.value || loadingSession.value) return
   loadingSession.value = true
   try {
     await archiveSession(s.session_id)
+    if (disposed) return
     sessions.value = sessions.value.filter((x) => x.session_id !== s.session_id)
     if (currentSession.value?.session_id === s.session_id) {
       currentSession.value = null
@@ -295,6 +297,10 @@ async function archive(s: QaSession) {
       firstMessagePage.value = 1
       await router.replace({ name: 'qa' })
     }
+    ElNotification.success({
+      title: '已归档',
+      message: '如需恢复或彻底删除，请到个人中心查看。',
+    })
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '归档失败')
   } finally {
@@ -380,25 +386,22 @@ onMounted(async () => {
       </el-button>
 
       <div class="session-list">
-        <div
-          v-for="s in sessions"
-          :key="s.session_id"
-          class="session-item"
-          :class="{ active: s.session_id === currentSession?.session_id }"
-          @click="selectSession(s.session_id)"
-        >
-          <div class="session-title">{{ s.title || '新对话' }}</div>
-          <div class="session-meta">
-            <span>{{ s.message_count }} 条消息</span>
-            <el-button
-              link
-              size="small"
-              type="danger"
-              :disabled="loadingSession || waiting"
-              @click.stop="archive(s)"
-              >归档</el-button
-            >
-          </div>
+        <div v-for="s in sessions" :key="s.session_id" class="archive-action-row">
+          <button
+            type="button"
+            class="session-item"
+            :class="{ active: s.session_id === currentSession?.session_id }"
+            :aria-current="s.session_id === currentSession?.session_id ? 'true' : undefined"
+            @click="selectSession(s.session_id)"
+          >
+            <span class="session-title">{{ s.title || '新对话' }}</span>
+            <span class="session-meta">{{ s.message_count }} 条消息</span>
+          </button>
+          <ArchiveRowActions
+            mode="archive"
+            :busy="loadingSession || waiting"
+            @archive="archive(s)"
+          />
         </div>
         <el-empty v-if="sessions.length === 0" description="暂无历史会话" :image-size="60" />
       </div>
@@ -541,6 +544,9 @@ onMounted(async () => {
           </el-button>
         </div>
       </div>
+      <p v-else-if="currentSession?.status === 'archived'" class="archive-note">
+        此会话已归档，可到个人中心还原。
+      </p>
     </main>
   </div>
 </template>
@@ -563,11 +569,23 @@ onMounted(async () => {
 .session-list {
   margin-top: 12px;
 }
-.session-item {
-  padding: 10px 12px;
-  border-radius: 6px;
-  cursor: pointer;
+.session-list .archive-action-row {
   margin-bottom: 4px;
+}
+.session-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.session-item:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -2px;
 }
 .session-item:hover {
   background: #f5f7fa;
@@ -576,6 +594,7 @@ onMounted(async () => {
   background: var(--el-color-primary-light-9);
 }
 .session-title {
+  display: block;
   font-size: 14px;
   color: #333;
   white-space: nowrap;
@@ -583,12 +602,17 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 .session-meta {
+  display: block;
   margin-top: 4px;
   font-size: 12px;
   color: #999;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+}
+.archive-note {
+  margin: 0;
+  border-top: 1px solid var(--el-border-color-light);
+  padding: 12px 16px;
+  color: var(--el-text-color-regular);
+  font-size: 14px;
 }
 .chat {
   flex: 1;

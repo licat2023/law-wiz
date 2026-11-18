@@ -30,7 +30,7 @@
 | `backend-java/src/main/java/com/lawwiz/business/BusinessApplication.java` | 启用持久清理失败后的定期重试 | 修改 | 已完成 |
 | `backend-java/src/test/java/com/lawwiz/business/review/ReviewArchiveTest.java` | 归档与彻底删除的状态边界 | 新增 | 已完成 |
 | `deploy/mysql-init/10-business-schema.sql`、`deploy/migrations/20261119-review-archive.sql`、`deploy/README.md` | 新库和已有库的归档及文件清理字段 | 修改及新增 | 已完成 |
-| `frontend/src/{api/review.ts,api/types.ts,views/ReviewView.vue,views/MeView.vue,components/ReviewRowActions.vue}` | 归档入口、管理卡片及共用悬停样式 | 修改及新增 | 已完成 |
+| `frontend/src/{api/review.ts,api/types.ts,views/ReviewView.vue,views/MeView.vue,components/ArchiveRowActions.vue}` | 归档入口、管理卡片及共用悬停样式 | 修改及新增 | 已完成 |
 | `frontend/src/main.ts` | 为通知和确认弹窗加载组件样式 | 修改 | 已完成 |
 | `docs/{04-数据库设计.md,05-接口设计.md,06-MVP演示指南.md,FILE_MAP.md,tasks/README.md}` | 契约、演示和任务记录 | 修改 | 已完成 |
 

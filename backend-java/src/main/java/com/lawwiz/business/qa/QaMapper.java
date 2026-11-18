@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -94,8 +95,27 @@ interface QaMapper {
             """)
     void countTurn(BigInteger id, String title);
 
-    @Update("UPDATE qa_session SET status = 'archived', updated_at = CURRENT_TIMESTAMP(3) WHERE id = #{id}")
-    void archive(BigInteger id);
+    @Update("UPDATE qa_session SET status = #{status}, updated_at = CURRENT_TIMESTAMP(3) WHERE id = #{id}")
+    void setStatus(BigInteger id, String status);
+
+    @Select("""
+            SELECT id FROM qa_message
+            WHERE qa_session_id = #{id} AND `role` = 'assistant' AND latency_ms IS NULL AND content = ''
+            """)
+    List<BigInteger> pendingAnswers(BigInteger id);
+
+    @Delete("""
+            DELETE citation FROM qa_citation citation
+            JOIN qa_message message ON message.id = citation.qa_message_id
+            WHERE message.qa_session_id = #{id}
+            """)
+    void deleteCitations(BigInteger id);
+
+    @Delete("DELETE FROM qa_message WHERE qa_session_id = #{id}")
+    void deleteMessages(BigInteger id);
+
+    @Delete("DELETE FROM qa_session WHERE id = #{id}")
+    void deleteSession(BigInteger id);
 
     @Select("""
             SELECT `role`, SUBSTRING(content,1,600) AS content FROM qa_message

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /** 个人中心展示账号信息、审查记录与归档管理。 */
-import { onMounted, ref } from 'vue'
-import { Document } from '@element-plus/icons-vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ChatDotRound, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 
 import { useRouter } from 'vue-router'
+import { deleteArchivedSession, listSessions, restoreSession } from '@/api/qa'
 import { deleteArchivedReview, listReviews, setReviewArchived } from '@/api/review'
-import type { ReviewListItem, ReviewStatus } from '@/api/types'
-import ReviewRowActions from '@/components/ReviewRowActions.vue'
+import type { Page, ReviewListItem, ReviewStatus } from '@/api/types'
+import ArchiveRowActions from '@/components/ArchiveRowActions.vue'
 
 import { useAuthStore } from '@/stores/auth'
 
@@ -24,7 +25,18 @@ const router = useRouter()
 const history = ref<ReviewListItem[]>([])
 const historyLoading = ref(false)
 const ARCHIVE_PAGE_SIZE = 10
-const archived = ref<ReviewListItem[]>([])
+const ARCHIVE_TABS = [
+  { name: 'review', label: '审查文档' },
+  { name: 'qa', label: '问答会话' },
+]
+interface ArchiveItem {
+  id: string
+  title: string
+  detail: string
+}
+const archiveKind = ref('review')
+const isQaArchive = computed(() => archiveKind.value === 'qa')
+const archived = ref<ArchiveItem[]>([])
 const archivePage = ref(1)
 const archiveTotal = ref(0)
 const archiveLoading = ref(false)
@@ -47,12 +59,36 @@ function statusMeta(status: ReviewStatus) {
   return REVIEW_STATUS_META[status]
 }
 
+async function fetchArchivePage(page: number): Promise<Page<ArchiveItem>> {
+  const params = { page, page_size: ARCHIVE_PAGE_SIZE }
+  if (isQaArchive.value) {
+    const result = await listSessions({ ...params, status: 'archived' })
+    return {
+      ...result,
+      items: result.items.map((session) => ({
+        id: session.session_id,
+        title: session.title || '新对话',
+        detail: `${session.message_count} 条消息 · ${(session.last_message_at || session.created_at).slice(0, 10)}`,
+      })),
+    }
+  }
+  const result = await listReviews({ ...params, archived: true })
+  return {
+    ...result,
+    items: result.items.map((review) => ({
+      id: review.task_id,
+      title: review.contract_title || '未命名合同',
+      detail: review.archived_at ? `归档于 ${review.archived_at.slice(0, 10)}` : '',
+    })),
+  }
+}
+
 async function loadArchive(page = archivePage.value) {
   if (archiveLoading.value) return
   archiveLoading.value = true
   archiveError.value = false
   try {
-    const result = await listReviews({ page, page_size: ARCHIVE_PAGE_SIZE, archived: true })
+    const result = await fetchArchivePage(page)
     archived.value = result.items
     archivePage.value = result.page
     archiveTotal.value = result.total
@@ -63,14 +99,27 @@ async function loadArchive(page = archivePage.value) {
   }
 }
 
-async function manageArchived(item: ReviewListItem, action: 'restore' | 'delete') {
+function canSwitchArchive() {
+  return !archiveBusy.value && !archiveLoading.value
+}
+
+watch(archiveKind, () => {
+  archived.value = []
+  archivePage.value = 1
+  archiveTotal.value = 0
+  void loadArchive()
+})
+
+async function manageArchived(item: ArchiveItem, action: 'restore' | 'delete') {
   if (archiveBusy.value || archiveLoading.value) return
+  const qa = isQaArchive.value
   archiveBusy.value = true
   try {
     if (action === 'delete') {
+      const contents = qa ? '会话消息和引用' : '此条目的审查报告和风险记录'
       const confirmed = await ElMessageBox.confirm(
-        `确定删除「${item.contract_title || '未命名合同'}」？此条目的审查报告和风险记录将一并删除，且无法恢复。`,
-        '彻底删除文档',
+        `确定删除「${item.title}」？${contents}将一并删除，且无法恢复。`,
+        qa ? '彻底删除会话' : '彻底删除文档',
         {
           type: 'warning',
           confirmButtonText: '彻底删除',
@@ -82,13 +131,15 @@ async function manageArchived(item: ReviewListItem, action: 'restore' | 'delete'
         () => false,
       )
       if (!confirmed) return
-      await deleteArchivedReview(item.task_id)
+      await (qa ? deleteArchivedSession(item.id) : deleteArchivedReview(item.id))
+    } else if (qa) {
+      await restoreSession(item.id)
     } else {
-      await setReviewArchived(item.task_id, false)
+      await setReviewArchived(item.id, false)
       void loadHistory()
     }
     ElMessage.success(action === 'delete' ? '已彻底删除' : '已还原')
-    archived.value = archived.value.filter((row) => row.task_id !== item.task_id)
+    archived.value = archived.value.filter((row) => row.id !== item.id)
     archiveTotal.value -= 1
     const lastPage = Math.max(1, Math.ceil(archiveTotal.value / ARCHIVE_PAGE_SIZE))
     await loadArchive(Math.min(archivePage.value, lastPage))
@@ -182,36 +233,50 @@ onMounted(async () => {
           </el-button>
         </div>
       </template>
-      <div v-loading="archiveLoading" class="archive-list">
-        <div v-for="item in archived" :key="item.task_id" class="review-action-row archive-row">
-          <el-icon class="archive-icon" aria-hidden="true"><Document /></el-icon>
-          <div class="archive-info">
-            <div class="archive-name" :title="item.contract_title">
-              {{ item.contract_title || '未命名合同' }}
+      <el-tabs v-model="archiveKind" :before-leave="canSwitchArchive">
+        <el-tab-pane
+          v-for="tab in ARCHIVE_TABS"
+          :key="tab.name"
+          :label="tab.label"
+          :name="tab.name"
+        >
+          <template v-if="archiveKind === tab.name">
+            <div v-loading="archiveLoading" class="archive-list">
+              <div v-for="item in archived" :key="item.id" class="archive-action-row archive-row">
+                <el-icon class="archive-icon" aria-hidden="true">
+                  <ChatDotRound v-if="isQaArchive" />
+                  <Document v-else />
+                </el-icon>
+                <div class="archive-info">
+                  <div class="archive-name" :title="item.title">{{ item.title }}</div>
+                  <div v-if="item.detail" class="archive-meta">{{ item.detail }}</div>
+                </div>
+                <ArchiveRowActions
+                  mode="manage"
+                  :busy="archiveBusy || archiveLoading"
+                  @restore="manageArchived(item, 'restore')"
+                  @delete="manageArchived(item, 'delete')"
+                />
+              </div>
+              <p v-if="archiveError" class="archive-empty" role="status">加载失败，请刷新重试。</p>
+              <p v-else-if="!archiveLoading && !archived.length" class="archive-empty">
+                {{ isQaArchive ? '暂无归档会话' : '暂无归档文档' }}
+              </p>
             </div>
-            <div class="archive-date">归档于 {{ item.archived_at?.slice(0, 10) }}</div>
-          </div>
-          <ReviewRowActions
-            mode="manage"
-            :busy="archiveBusy || archiveLoading"
-            @restore="manageArchived(item, 'restore')"
-            @delete="manageArchived(item, 'delete')"
-          />
-        </div>
-        <p v-if="archiveError" class="archive-empty" role="status">加载失败，请刷新重试。</p>
-        <p v-else-if="!archiveLoading && !archived.length" class="archive-empty">暂无归档文档</p>
-      </div>
-      <el-pagination
-        v-if="archiveTotal > ARCHIVE_PAGE_SIZE"
-        :current-page="archivePage"
-        :page-size="ARCHIVE_PAGE_SIZE"
-        :total="archiveTotal"
-        :disabled="archiveBusy || archiveLoading"
-        size="small"
-        layout="prev, pager, next"
-        class="archive-pagination"
-        @current-change="loadArchive"
-      />
+            <el-pagination
+              v-if="archiveTotal > ARCHIVE_PAGE_SIZE"
+              :current-page="archivePage"
+              :page-size="ARCHIVE_PAGE_SIZE"
+              :total="archiveTotal"
+              :disabled="archiveBusy || archiveLoading"
+              size="small"
+              layout="prev, pager, next"
+              class="archive-pagination"
+              @current-change="loadArchive"
+            />
+          </template>
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
   </div>
 </template>
@@ -263,7 +328,7 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.archive-date {
+.archive-meta {
   margin-top: 3px;
   font-size: 12px;
   color: var(--el-text-color-secondary);

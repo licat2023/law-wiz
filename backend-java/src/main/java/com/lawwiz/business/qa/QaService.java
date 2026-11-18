@@ -19,6 +19,8 @@ import com.lawwiz.business.review.ReportContexts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.JsonNode;
@@ -120,6 +122,7 @@ class QaService {
     }
 
     Submission ask(BigInteger owner, BigInteger sessionId, String question, String requestId) {
+        var stream = new QaAnswerStream();
         var submission = transactions.execute(status -> {
             var session = owned(owner, mapper.lock(sessionId));
             if (!"active".equals(session.status())) {
@@ -129,12 +132,11 @@ class QaService {
             BigInteger questionId = insertMessage(sessionId, "user", question);
             BigInteger answerId = insertMessage(sessionId, "assistant", "");
             mapper.countTurn(sessionId, ApiValues.limit(question, 50));
+            registerAnswerStream(answerId, stream);
             return new Submission(questionId.toString(), answerId.toString(), "pending");
         });
         BigInteger answerId = ApiValues.id(submission.assistantMessageId());
         BigInteger questionId = ApiValues.id(submission.userMessageId());
-        var stream = new QaAnswerStream();
-        activeAnswers.put(answerId, stream);
         background.submit(
                 () -> answer(owner, sessionId, questionId, answerId, question, requestId, stream),
                 () -> {
@@ -142,6 +144,21 @@ class QaService {
                     finishStream(answerId, stream);
                 });
         return submission;
+    }
+
+    /** Register the stream before releasing the session lock, and discard it on rollback. */
+    private void registerAnswerStream(BigInteger answerId, QaAnswerStream stream) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void beforeCommit(boolean readOnly) {
+                activeAnswers.put(answerId, stream);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) activeAnswers.remove(answerId, stream);
+            }
+        });
     }
 
     /** A subscription observes the existing background task; it cannot start a new turn. */
@@ -154,10 +171,28 @@ class QaService {
         return stream == null ? QaAnswerStream.finishedSubscription() : stream.subscribe();
     }
 
-    void archive(BigInteger owner, BigInteger id) {
-        transactions.executeWithoutResult(status -> {
-            owned(owner, mapper.lock(id));
-            mapper.archive(id);
+    /** Toggle archive membership without changing the conversation history. */
+    void setArchived(BigInteger owner, BigInteger id, boolean archived) {
+        transactions.executeWithoutResult(ignored -> {
+            var session = owned(owner, mapper.lock(id));
+            String next = archived ? "archived" : "active";
+            if (!next.equals(session.status())) mapper.setStatus(id, next);
+        });
+    }
+
+    /** Remove an owned archived conversation, including its messages and citations. */
+    void deleteArchived(BigInteger owner, BigInteger id) {
+        transactions.executeWithoutResult(ignored -> {
+            var session = owned(owner, mapper.lock(id));
+            if (!"archived".equals(session.status())) {
+                throw new ApiError(40911, "请先归档会话再彻底删除");
+            }
+            if (mapper.pendingAnswers(id).stream().anyMatch(activeAnswers::containsKey)) {
+                throw new ApiError(40911, "请等待回答完成后再彻底删除");
+            }
+            mapper.deleteCitations(id);
+            mapper.deleteMessages(id);
+            mapper.deleteSession(id);
         });
     }
 
@@ -176,7 +211,7 @@ class QaService {
             }
             long start = System.nanoTime();
             JsonNode result = inference.qa(payload, requestId, "qa_" + answerId, stream::append);
-            store(answerId, result, (int) TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            store(sessionId, answerId, result, (int) TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         } catch (ApiError error) {
             failed(answerId, "回答生成失败：" + error.getMessage());
         } catch (RuntimeException error) {
@@ -195,12 +230,13 @@ class QaService {
         }
     }
 
-    private void store(BigInteger answerId, JsonNode result, int latency) {
+    private void store(BigInteger sessionId, BigInteger answerId, JsonNode result, int latency) {
         var valid = result.path("citations").valueStream()
                 .filter(source -> !source.path("document_id").asString("").isEmpty()
                         && !source.path("knowledge_base_chunk_id").asString("").isEmpty())
                 .toList();
         transactions.executeWithoutResult(status -> {
+            if (mapper.lock(sessionId) == null) return;
             int updated = mapper.finish(answerId, result.path("answer").asString().strip(), !valid.isEmpty(),
                     ApiValues.limit(result.path("model_name").asString(null), 64), latency);
             if (updated == 1) {

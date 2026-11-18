@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 审查文档列表共用的行内图标动作。父元素使用 review-action-row 包住条目与图标。 */
+/** 文档与会话共用的归档图标。父元素使用 archive-action-row 包住条目与图标。 */
 import { Delete, RefreshLeft, TakeawayBox } from '@element-plus/icons-vue'
 
 withDefaults(defineProps<{ mode: 'archive' | 'manage'; busy?: boolean }>(), { busy: false })
@@ -8,10 +8,10 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
 </script>
 
 <template>
-  <div class="review-row-actions" role="group" aria-label="文档操作">
+  <div class="archive-row-actions" role="group" aria-label="归档操作">
     <button
       v-if="mode === 'archive'"
-      class="review-row-action"
+      class="archive-row-action"
       type="button"
       title="归档"
       aria-label="归档"
@@ -22,7 +22,7 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
     </button>
     <template v-else>
       <button
-        class="review-row-action review-row-action--restore"
+        class="archive-row-action archive-row-action--restore"
         type="button"
         title="还原"
         aria-label="还原"
@@ -32,7 +32,7 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
         <el-icon aria-hidden="true"><RefreshLeft /></el-icon>
       </button>
       <button
-        class="review-row-action"
+        class="archive-row-action"
         type="button"
         title="彻底删除"
         aria-label="彻底删除"
@@ -46,10 +46,10 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
 </template>
 
 <style>
-.review-action-row {
+.archive-action-row {
   position: relative;
 }
-.review-action-row .review-row-actions {
+.archive-action-row .archive-row-actions {
   position: absolute;
   inset: 0 0 0 auto;
   display: flex;
@@ -61,11 +61,11 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
   pointer-events: none;
   opacity: 0;
 }
-.review-action-row:hover .review-row-actions,
-.review-action-row:has(:focus-visible) .review-row-actions {
+.archive-action-row:hover .archive-row-actions,
+.archive-action-row:has(:focus-visible) .archive-row-actions {
   opacity: 1;
 }
-.review-action-row .review-row-action {
+.archive-action-row .archive-row-action {
   display: grid;
   place-items: center;
   width: 32px;
@@ -78,33 +78,33 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
   cursor: pointer;
   font-size: 17px;
 }
-.review-action-row .review-row-action--restore {
-  --review-action-color: var(--el-color-success-dark-2);
-  --review-action-background: var(--el-color-success-light-9);
-  color: var(--review-action-color);
+.archive-action-row .archive-row-action--restore {
+  --archive-action-color: var(--el-color-success-dark-2);
+  --archive-action-background: var(--el-color-success-light-9);
+  color: var(--archive-action-color);
 }
-.review-action-row:hover .review-row-action,
-.review-action-row:has(:focus-visible) .review-row-action {
+.archive-action-row:hover .archive-row-action,
+.archive-action-row:has(:focus-visible) .archive-row-action {
   pointer-events: auto;
 }
-.review-action-row .review-row-action:disabled {
+.archive-action-row .archive-row-action:disabled {
   cursor: wait;
   opacity: 0.45;
 }
-.review-action-row .review-row-action:hover:not(:disabled),
-.review-action-row .review-row-action:focus-visible {
-  color: var(--review-action-color, var(--el-color-danger-dark-2));
-  background: var(--review-action-background, var(--el-color-danger-light-9));
+.archive-action-row .archive-row-action:hover:not(:disabled),
+.archive-action-row .archive-row-action:focus-visible {
+  color: var(--archive-action-color, var(--el-color-danger-dark-2));
+  background: var(--archive-action-background, var(--el-color-danger-light-9));
 }
-.review-action-row .review-row-action:focus-visible {
+.archive-action-row .archive-row-action:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: -2px;
 }
 @media (hover: none) {
-  .review-action-row .review-row-actions {
+  .archive-action-row .archive-row-actions {
     opacity: 1;
   }
-  .review-action-row .review-row-action {
+  .archive-action-row .archive-row-action {
     pointer-events: auto;
   }
 }
