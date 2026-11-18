@@ -21,9 +21,11 @@
 | `knowledge_base/backend/app/indexing/` | 切分、嵌入、关键词倒排、处理任务与索引发布 |
 | `knowledge_base/backend/app/retrieval/` | 从生效索引召回候选，融合、重排并组装来源 |
 | `frontend/`、`knowledge_base/frontend/` | 业务界面与知识库管理界面 |
+| `frontend/src/components/` | 业务前端共用组件 |
 | 两个前端目录的 `Dockerfile`、`nginx.conf` | Vite 开发镜像、生产静态站点镜像及同源 API 代理 |
 | `deploy/` | 开发和生产全栈编排、环境样例、数据库账号初始化和站点部署说明 |
 | `deploy/mysql-init/` | 基于 MySQL 9.7 的初始化镜像，内置业务表结构及知识库账号脚本 |
+| `deploy/migrations/` | 已有业务数据库的升级 SQL |
 | `docs/`、`docs/adr/` | 需求、设计、接口和架构决策 |
 | `docs/assets/`、`tools/` | 文档插图、图源与渲染脚本 |
 | `tools/legal-corpus/` | 公开法规采集、Docling 转换和知识库写入命令 |

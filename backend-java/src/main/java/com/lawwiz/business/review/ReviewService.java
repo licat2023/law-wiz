@@ -7,12 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import com.lawwiz.business.api.ApiError;
 import com.lawwiz.business.api.ApiValues;
 import com.lawwiz.business.api.BackgroundTasks;
 import com.lawwiz.business.files.BusinessFiles;
 import com.lawwiz.business.inference.InferenceClient;
+import com.lawwiz.business.qa.QaReviewLinks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,7 +27,8 @@ import tools.jackson.databind.ObjectMapper;
 class ReviewService {
     record Counts(int high, int medium, int low) {}
     record Page(List<Item> items, int page, int pageSize, long total) {}
-    record Item(String taskId, String contractTitle, String status, Counts counts, String createdAt, String finishedAt) {}
+    record Item(String taskId, String contractTitle, String status, Counts counts, String createdAt,
+                String finishedAt, String archivedAt) {}
     record Download(String filename, byte[] bytes) {}
     record TaskView(String taskId, String status, String stage, int progress, String errorCode,
                     String errorMessage, String startedAt, String finishedAt, String createdAt) {}
@@ -46,9 +49,11 @@ class ReviewService {
     private final TransactionTemplate transactions;
     private final BackgroundTasks background;
     private final ObjectMapper json;
+    private final QaReviewLinks qaLinks;
 
     ReviewService(ReviewMapper mapper, BusinessFiles files, InferenceClient inference, ReviewPdf pdf,
-                  TransactionTemplate transactions, BackgroundTasks background, ObjectMapper json) {
+                  TransactionTemplate transactions, BackgroundTasks background, ObjectMapper json,
+                  QaReviewLinks qaLinks) {
         this.mapper = mapper;
         this.files = files;
         this.inference = inference;
@@ -56,14 +61,15 @@ class ReviewService {
         this.transactions = transactions;
         this.background = background;
         this.json = json;
+        this.qaLinks = qaLinks;
     }
 
     TaskView create(BigInteger owner, BigInteger fileId, String title, boolean force, String requestId) {
-        var source = files.source(fileId);
         var task = transactions.execute(status -> {
             if (mapper.lockOwner(owner) == null) {
                 throw new ApiError(40101, "访问令牌无效或已过期");
             }
+            var source = files.lockSource(fileId);
             var version = mapper.findVersion(owner, fileId);
             if (version == null) {
                 version = createVersion(owner, fileId, ApiValues.limit(fallback(title, fallback(source.name(), "未命名合同")), 200));
@@ -83,7 +89,7 @@ class ReviewService {
         return view(owned(owner, id));
     }
 
-    Page list(BigInteger owner, String status, String sort, int page, int size) {
+    Page list(BigInteger owner, String status, boolean archived, String sort, int page, int size) {
         long offset = ApiValues.offset(page, size);
         if (status != null && !STATUSES.contains(status)) {
             throw new ApiError(40001, "status 取值不合法");
@@ -91,10 +97,56 @@ class ReviewService {
         if (!SORTS.contains(sort)) {
             throw new ApiError(40001, "sort 取值不合法");
         }
-        var items = mapper.list(owner, status, sort, size, offset).stream().map(task -> new Item(task.id().toString(),
-                title(task), task.status(), savedCounts(mapper.report(task.id())), ApiValues.timestamp(task.createdAt()),
-                ApiValues.timestamp(task.finishedAt()))).toList();
-        return new Page(items, page, size, mapper.count(owner, status));
+        var items = mapper.list(owner, status, archived, sort, size, offset).stream().map(task ->
+                new Item(task.id().toString(), title(task), task.status(), savedCounts(mapper.report(task.id())),
+                        ApiValues.timestamp(task.createdAt()), ApiValues.timestamp(task.finishedAt()),
+                        ApiValues.timestamp(task.archivedAt()))).toList();
+        return new Page(items, page, size, mapper.count(owner, status, archived));
+    }
+
+    /** Preserve the report and use the archive flag solely for list membership. */
+    void setArchived(BigInteger owner, BigInteger id, boolean archived) {
+        transactions.executeWithoutResult(ignored -> {
+            requireOwner(owner, mapper.lockTask(id));
+            mapper.setArchived(id, archived);
+        });
+    }
+
+    /** Delete a finished archived task atomically, then remove any retired file copies. */
+    void deleteArchived(BigInteger owner, BigInteger id) {
+        var retired = transactions.execute(ignored -> {
+            mapper.lockOwner(owner); // Serialize with creation of reviews of the same contract version.
+            var task = requireOwner(owner, mapper.lockTask(id));
+            if (task.archivedAt() == null) {
+                throw new ApiError(40910, "请先归档再彻底删除");
+            }
+            if ("pending".equals(task.status()) || "processing".equals(task.status())) {
+                throw new ApiError(40910, "审查进行中，请完成后再彻底删除");
+            }
+
+            var candidates = new TreeSet<BigInteger>();
+            var reportFile = mapper.reportFile(id);
+            if (reportFile != null) candidates.add(reportFile);
+            qaLinks.detach(id);
+            mapper.deletePoints(id);
+            mapper.deleteReport(id);
+            mapper.deleteTask(id);
+
+            if (task.contractVersionId() != null) {
+                var version = mapper.unusedVersion(owner, task.contractVersionId());
+                if (version != null) {
+                    if (version.fileObjectId() != null) candidates.add(version.fileObjectId());
+                    mapper.replaceCurrentVersion(version.contractId(), version.id());
+                    mapper.deleteVersion(version.id());
+                    mapper.deleteEmptyContract(version.contractId());
+                }
+            }
+            return candidates.stream().filter(file -> files.retire(owner, file)).toList();
+        });
+        if (!retired.isEmpty()) {
+            // The retirement markers remain available to the scheduled sweep if the queue is full.
+            background.submit(() -> retired.forEach(files::purgeRetired), () -> {});
+        }
     }
 
     Map<String, Object> result(BigInteger owner, BigInteger id) {
@@ -128,7 +180,7 @@ class ReviewService {
 
     PointView dismiss(BigInteger owner, BigInteger id, BigInteger risk, boolean dismissed) {
         return transactions.execute(status -> {
-            owned(owner, id);
+            requireOwner(owner, mapper.lockTask(id));
             if (mapper.point(id, risk) == null) {
                 throw new ApiError(40401, "风险点不存在");
             }
@@ -153,12 +205,13 @@ class ReviewService {
             String title = fallback(title(task), "合同 #" + task.contractVersionId());
             String summary = summary(counts);
             byte[] report = pdf.render(title, summary, result.path("extracted_terms"), risks);
-            BigInteger file = files.saveReport(task.userId(), ApiValues.limit(title, 240) + "-审查报告.pdf", report);
             transactions.executeWithoutResult(status -> {
+                mapper.lockOwner(task.userId());
                 if (mapper.finish(task.id(), result.path("extracted_terms").toString(), json.createObjectNode()
                         .set("contract_review", result).toString()) != 1) {
                     throw new ApiError(40907, "审查任务状态已变更");
                 }
+                BigInteger file = files.saveReport(task.userId(), ApiValues.limit(title, 240) + "-审查报告.pdf", report);
                 for (JsonNode risk : risks) {
                     mapper.insertPoint(riskValues(task.id(), risk));
                 }
@@ -247,7 +300,10 @@ class ReviewService {
     }
 
     private ReviewMapper.Task owned(BigInteger owner, BigInteger id) {
-        var task = mapper.task(id);
+        return requireOwner(owner, mapper.task(id));
+    }
+
+    private ReviewMapper.Task requireOwner(BigInteger owner, ReviewMapper.Task task) {
         if (task == null) {
             throw new ApiError(40401, "审查任务不存在");
         }

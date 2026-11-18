@@ -1,12 +1,20 @@
 <script setup lang="ts">
 /** 管理审查文档列表、上传和当前任务的查看入口。 */
 import { Document, FolderOpened, Upload } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { createReview, listReviews, newIdempotencyKey, uploadFile } from '@/api/review'
-import type { ReviewListItem, ReviewStatus, ReviewTaskData } from '@/api/types'
+import {
+  createReview,
+  listReviews,
+  newIdempotencyKey,
+  setReviewArchived,
+  uploadFile,
+} from '@/api/review'
+import { ApiError } from '@/api/client'
+import { ErrorCode, type ReviewListItem, type ReviewStatus, type ReviewTaskData } from '@/api/types'
+import ReviewRowActions from '@/components/ReviewRowActions.vue'
 import ReviewDetailView from './ReviewDetailView.vue'
 
 const PAGE_SIZE = 20
@@ -42,7 +50,9 @@ const listLoading = ref(false)
 const listFailed = ref(false)
 const hasMore = ref(false)
 const observedStatuses = new Map<string, ReviewStatus>()
+const archiveBusy = ref(false)
 let nextPage = 1
+let listRequest = 0
 
 const submission = shallowRef<Submission>()
 const uploading = ref(false)
@@ -54,12 +64,16 @@ let disposed = false
 
 watch(selectedTaskId, () => detailScroll.value?.scrollTo(0, 0))
 
-async function loadDocuments() {
-  if (listLoading.value) return
+async function loadDocuments(reset = false) {
+  if (listLoading.value && !reset) return
+  const request = ++listRequest
+  const resetIds = reset ? new Set(documents.value.map((item) => item.task_id)) : null
   listLoading.value = true
   listFailed.value = false
   try {
-    const page = await listReviews({ page: nextPage, page_size: PAGE_SIZE })
+    const page = await listReviews({ page: reset ? 1 : nextPage, page_size: PAGE_SIZE })
+    if (disposed || request !== listRequest) return
+    if (resetIds) documents.value = documents.value.filter((item) => !resetIds.has(item.task_id))
     const loaded = new Set(documents.value.map((item) => item.task_id))
     for (const item of page.items) {
       if (!loaded.has(item.task_id)) {
@@ -70,9 +84,31 @@ async function loadDocuments() {
     nextPage = page.page + 1
     hasMore.value = page.page * page.page_size < page.total
   } catch {
-    listFailed.value = true
+    if (request === listRequest) listFailed.value = true
   } finally {
-    listLoading.value = false
+    if (request === listRequest) listLoading.value = false
+  }
+}
+
+async function archiveDocument(taskId: string) {
+  if (archiveBusy.value) return
+  archiveBusy.value = true
+  try {
+    await setReviewArchived(taskId, true)
+    if (disposed) return
+    documents.value = documents.value.filter((item) => item.task_id !== taskId)
+    observedStatuses.delete(taskId)
+    nextPage = 1
+    void loadDocuments(true)
+    if (selectedTaskId.value === taskId) await router.replace({ name: 'review' })
+    ElNotification.success({
+      title: '已归档',
+      message: '如需恢复或彻底删除，请到个人中心查看。',
+    })
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '归档失败，请重试')
+  } finally {
+    archiveBusy.value = false
   }
 }
 
@@ -147,6 +183,10 @@ async function submitReview() {
     }
     submission.value = undefined
   } catch (error) {
+    if (error instanceof ApiError && error.code === ErrorCode.FILE_NOT_FOUND) {
+      pending.fileId = undefined
+      uploadProgress.value = 0
+    }
     uploadError.value = error instanceof Error ? error.message : '提交失败，请重试'
   } finally {
     uploading.value = false
@@ -245,25 +285,30 @@ onUnmounted(() => {
             </span>
           </span>
         </RouterLink>
-        <RouterLink
-          v-for="item in documents"
-          :key="item.task_id"
-          class="document-row"
-          :to="{ name: 'review-detail', params: { taskId: item.task_id } }"
-        >
-          <el-icon class="document-icon" aria-hidden="true"><Document /></el-icon>
-          <span class="document-info">
-            <span class="document-name" :title="item.contract_title">{{
-              item.contract_title
-            }}</span>
-            <span class="document-meta">
-              <span class="document-status" :data-status="item.status">
-                {{ STATUS_LABEL[item.status] }}
+        <div v-for="item in documents" :key="item.task_id" class="review-action-row">
+          <RouterLink
+            class="document-row"
+            :to="{ name: 'review-detail', params: { taskId: item.task_id } }"
+          >
+            <el-icon class="document-icon" aria-hidden="true"><Document /></el-icon>
+            <span class="document-info">
+              <span class="document-name" :title="item.contract_title">{{
+                item.contract_title
+              }}</span>
+              <span class="document-meta">
+                <span class="document-status" :data-status="item.status">
+                  {{ STATUS_LABEL[item.status] }}
+                </span>
+                <span v-if="item.created_at">{{ item.created_at.slice(0, 10) }}</span>
               </span>
-              <span v-if="item.created_at">{{ item.created_at.slice(0, 10) }}</span>
             </span>
-          </span>
-        </RouterLink>
+          </RouterLink>
+          <ReviewRowActions
+            mode="archive"
+            :busy="archiveBusy"
+            @archive="archiveDocument(item.task_id)"
+          />
+        </div>
 
         <p v-if="listLoading && !documents.length" class="list-hint">正在加载文档…</p>
         <p v-else-if="!listFailed && !documents.length && !submission" class="list-hint">
@@ -271,7 +316,7 @@ onUnmounted(() => {
         </p>
         <div v-if="listFailed" class="list-hint" role="status">
           文档列表加载失败
-          <el-button link type="primary" @click="loadDocuments">重试</el-button>
+          <el-button link type="primary" @click="loadDocuments()">重试</el-button>
         </div>
         <el-button
           v-else-if="hasMore"
@@ -279,7 +324,7 @@ onUnmounted(() => {
           link
           type="primary"
           :loading="listLoading"
-          @click="loadDocuments"
+          @click="loadDocuments()"
         >
           加载更多
         </el-button>

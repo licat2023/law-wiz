@@ -68,6 +68,7 @@ export const ErrorCode = {
   REVIEW_FAILED: 40907,
   KNOWLEDGE_BASE_DOC_EXISTS: 40908,
   SESSION_ARCHIVED: 40909,
+  REVIEW_DELETE_CONFLICT: 40910,
 
   FILE_TOO_LARGE: 41301,
   UNSUPPORTED_FILE_TYPE: 41501,
@@ -230,6 +231,7 @@ export interface ReviewListItem {
   counts: { high: number; medium: number; low: number }
   created_at: string
   finished_at: string | null
+  archived_at: string | null
 }
 
 // ============================================================

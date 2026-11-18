@@ -150,6 +150,19 @@ public class ObjectStorage implements org.springframework.boot.ApplicationRunner
         }
     }
 
+    /** Remove a stored copy. Repeating a deletion of the same key is safe. */
+    void remove(String location, String key) {
+        try {
+            if ("local".equals(location)) {
+                Files.deleteIfExists(legacyPath(key));
+            } else {
+                requireS3().deleteObject(request -> request.bucket(location).key(key));
+            }
+        } catch (IOException | SdkException error) {
+            throw unavailable();
+        }
+    }
+
     private Path legacyPath(String key) {
         Path path = legacyRoot.resolve(key).normalize();
         if (!path.startsWith(legacyRoot) || path.equals(legacyRoot)) {

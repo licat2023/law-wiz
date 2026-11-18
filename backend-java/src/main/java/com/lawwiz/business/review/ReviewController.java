@@ -21,6 +21,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 class ReviewController {
     record Create(@NotNull @Size(max = 32) String fileId, @Size(max = 200) String contractTitle, Boolean force) {}
     record Dismiss(@NotNull Boolean isDismissed) {}
+    record Archive(@NotNull Boolean archived) {}
 
     private final ReviewService reviews;
     private final AccessTokens tokens;
@@ -73,10 +75,26 @@ class ReviewController {
     ApiEnvelope list(@RequestParam(defaultValue = "1") int page,
                      @RequestParam(name = "page_size", defaultValue = "20") int size,
                      @RequestParam(required = false) String status,
+                     @RequestParam(defaultValue = "false") boolean archived,
                      @RequestParam(defaultValue = "-created_at") String sort,
                      HttpServletRequest request, HttpServletResponse response) {
-        return ApiEnvelope.success(reviews.list(authorize(request, response, "read", readLimit), status, sort, page, size),
+        return ApiEnvelope.success(reviews.list(authorize(request, response, "read", readLimit), status, archived, sort, page, size),
                 request);
+    }
+
+    /** Move a task into or out of its owner's archive. */
+    @PatchMapping("/{id}/archive")
+    ApiEnvelope archive(@PathVariable String id, @Valid @RequestBody Archive payload,
+                        HttpServletRequest request, HttpServletResponse response) {
+        reviews.setArchived(authorize(request, response, "read", readLimit), ApiValues.id(id), payload.archived());
+        return ApiEnvelope.success(null, request);
+    }
+
+    /** Permanently delete an archived task after validating its owner and state. */
+    @DeleteMapping("/{id}")
+    ApiEnvelope delete(@PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
+        reviews.deleteArchived(authorize(request, response, "read", readLimit), ApiValues.id(id));
+        return ApiEnvelope.success(null, request);
     }
 
     @GetMapping("/{id}")

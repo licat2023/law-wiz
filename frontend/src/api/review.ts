@@ -71,8 +71,20 @@ export function reviewReportUrl(taskId: string, format: 'pdf' = 'pdf') {
 }
 
 /** C-05 审查历史列表 */
-export function listReviews(params: { page?: number; page_size?: number; status?: string } = {}) {
+export function listReviews(
+  params: { page?: number; page_size?: number; status?: string; archived?: boolean } = {},
+) {
   return api.get<Page<ReviewListItem>>('/reviews', params)
+}
+
+/** C-07 归档或还原一份审查记录。 */
+export function setReviewArchived(taskId: string, archived: boolean) {
+  return api.patch<null>(`/reviews/${taskId}/archive`, { archived })
+}
+
+/** C-08 彻底删除归档且已结束的审查记录。 */
+export function deleteArchivedReview(taskId: string) {
+  return api.delete<null>(`/reviews/${taskId}`)
 }
 
 /** C-06 标记风险点为误报（收集模型误报样本的唯一途径） */

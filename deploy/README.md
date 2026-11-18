@@ -56,6 +56,8 @@ MySQL 镜像以 `mysql:9.7` 为底镜像并内置初始化脚本。首次启动�
 
 已有数据库升级时，先按业务后端说明审核并执行报告追问迁移 SQL，再按知识库说明创建关键词表。知识库构建成功后，可以在本目录用一次性容器访问内部数据库，先以 `--schema-sql` 审核，再以 `--create-tables` 应用结构变更。知识库启动后用同一命令入口和 `--knowledge-base <库ID>` 分批排入重建任务。[业务后端说明](../backend/README.md) · [知识库升级](../knowledge_base/README.md#已有库升级)
 
+部署审查文档归档功能前，在已有的业务数据库执行一次 [归档升级 SQL](migrations/20261119-review-archive.sql)。该脚本应在报告追问升级之后运行。新数据库卷由初始化脚本直接建出所需字段和索引。
+
 ```bash
 docker compose -f docker-compose.prod.yml run --rm --no-deps knowledge-base \
   python -m scripts.rebuild_keyword_index --schema-sql

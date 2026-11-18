@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -16,13 +17,14 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 interface ReviewMapper {
     String TASK = "id,user_id,contract_id,contract_version_id,status,stage,progress,error_code,error_message,"
-            + "started_at,finished_at,created_at,extracted_terms";
+            + "started_at,finished_at,created_at,extracted_terms,archived_at";
     String POINT = "id,risk_level,risk_category,clause_title,clause_text,char_start,char_end,"
             + "description,suggestion,legal_basis,source_type,confidence,is_dismissed";
 
     record Task(BigInteger id, BigInteger userId, BigInteger contractId, BigInteger contractVersionId,
                 String status, String stage, int progress, String errorCode, String errorMessage,
-                LocalDateTime startedAt, LocalDateTime finishedAt, LocalDateTime createdAt, String extractedTerms) {}
+                LocalDateTime startedAt, LocalDateTime finishedAt, LocalDateTime createdAt, String extractedTerms,
+                LocalDateTime archivedAt) {}
     record Version(BigInteger id, BigInteger contractId, BigInteger fileObjectId, String plainText) {}
     record Report(BigInteger fileObjectId, String summary, int highCount, int mediumCount, int lowCount) {}
     record Point(BigInteger id, String riskLevel, String riskCategory, String clauseTitle, String clauseText,
@@ -70,23 +72,36 @@ interface ReviewMapper {
     @Select("SELECT " + TASK + " FROM review_task WHERE id = #{id} AND deleted_at IS NULL")
     Task task(BigInteger id);
 
+    @Select("SELECT " + TASK + " FROM review_task WHERE id = #{id} AND deleted_at IS NULL FOR UPDATE")
+    Task lockTask(BigInteger id);
+
+    @Update("""
+            UPDATE review_task
+            SET archived_at = IF(#{archived}, COALESCE(archived_at, CURRENT_TIMESTAMP(3)), NULL),
+                updated_at = CURRENT_TIMESTAMP(3)
+            WHERE id = #{id}
+            """)
+    void setArchived(BigInteger id, boolean archived);
+
     @Select("SELECT title FROM contract WHERE id = #{id}")
     String contractTitle(BigInteger id);
 
     @Select("SELECT COUNT(*) FROM review_task WHERE user_id = #{owner} AND deleted_at IS NULL "
-            + "AND (#{status} IS NULL OR status = #{status})")
-    long count(BigInteger owner, String status);
+            + "AND (archived_at IS NOT NULL) = #{archived} AND (#{status} IS NULL OR status = #{status})")
+    long count(BigInteger owner, String status, boolean archived);
 
     @Select("SELECT " + TASK + """
              FROM review_task WHERE user_id = #{owner} AND deleted_at IS NULL
+             AND (archived_at IS NOT NULL) = #{archived}
              AND (#{status} IS NULL OR status = #{status})
-             ORDER BY CASE WHEN #{sort} = '-created_at' THEN created_at END DESC,
+             ORDER BY CASE WHEN #{archived} THEN archived_at END DESC,
+                      CASE WHEN #{sort} = '-created_at' THEN created_at END DESC,
                       CASE WHEN #{sort} = 'created_at' THEN created_at END ASC,
                       CASE WHEN #{sort} = '-finished_at' THEN finished_at END DESC,
                       CASE WHEN #{sort} = 'finished_at' THEN finished_at END ASC, id ASC
              LIMIT #{size} OFFSET #{offset}
             """)
-    List<Task> list(BigInteger owner, String status, String sort, int size, long offset);
+    List<Task> list(BigInteger owner, String status, boolean archived, String sort, int size, long offset);
 
     @Update("""
             UPDATE review_task SET status = 'processing', stage = 'text_extract', progress = 15,
@@ -146,4 +161,44 @@ interface ReviewMapper {
             VALUES(#{id},#{file},#{summary},#{high},#{medium},#{low})
             """)
     void insertReport(BigInteger id, BigInteger file, String summary, int high, int medium, int low);
+
+    @Select("SELECT file_object_id FROM review_report WHERE review_task_id = #{id}")
+    BigInteger reportFile(BigInteger id);
+
+    @Delete("DELETE FROM review_report WHERE review_task_id = #{id}")
+    void deleteReport(BigInteger id);
+
+    @Delete("DELETE FROM risk_point WHERE review_task_id = #{id}")
+    void deletePoints(BigInteger id);
+
+    @Delete("DELETE FROM review_task WHERE id = #{id}")
+    void deleteTask(BigInteger id);
+
+    @Select("""
+            SELECT version.id,version.contract_id,version.file_object_id,NULL AS plain_text
+            FROM contract_version version JOIN contract ON contract.id = version.contract_id
+            WHERE version.id = #{id} AND contract.owner_id = #{owner}
+              AND NOT EXISTS(SELECT 1 FROM review_task WHERE contract_version_id = version.id)
+            """)
+    Version unusedVersion(BigInteger owner, BigInteger id);
+
+    @Update("""
+            UPDATE contract
+            SET current_version_id = (
+                SELECT id FROM contract_version WHERE contract_id = #{contract} AND id <> #{version}
+                ORDER BY version_no DESC LIMIT 1
+            )
+            WHERE id = #{contract} AND current_version_id = #{version}
+            """)
+    void replaceCurrentVersion(BigInteger contract, BigInteger version);
+
+    @Delete("DELETE FROM contract_version WHERE id = #{id}")
+    void deleteVersion(BigInteger id);
+
+    @Delete("""
+            DELETE FROM contract WHERE id = #{id}
+              AND NOT EXISTS(SELECT 1 FROM contract_version WHERE contract_id = #{id})
+              AND NOT EXISTS(SELECT 1 FROM review_task WHERE contract_id = #{id})
+            """)
+    void deleteEmptyContract(BigInteger id);
 }

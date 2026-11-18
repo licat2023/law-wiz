@@ -15,8 +15,11 @@ import com.lawwiz.business.api.ApiValues;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 /** Enforce upload bounds and metadata permissions around content-addressed storage. */
@@ -27,17 +30,19 @@ public class BusinessFiles {
 
     private final FileMapper files;
     private final ObjectStorage storage;
+    private final TransactionTemplate transactions;
     private final long maxUpload;
     private final long byteQuota;
     private final long numberQuota;
     private final Semaphore uploadSlots = new Semaphore(2);
 
-    BusinessFiles(FileMapper files, ObjectStorage storage,
+    BusinessFiles(FileMapper files, ObjectStorage storage, TransactionTemplate transactions,
                   @Value("${LAWWIZ_MAX_UPLOAD_BYTES:20971520}") long maxUpload,
                   @Value("${LAWWIZ_UPLOAD_QUOTA_BYTES_PER_USER:209715200}") long byteQuota,
                   @Value("${LAWWIZ_UPLOAD_QUOTA_FILES_PER_USER:50}") long numberQuota) {
         this.files = files;
         this.storage = storage;
+        this.transactions = transactions;
         this.maxUpload = maxUpload;
         this.byteQuota = byteQuota;
         this.numberQuota = numberQuota;
@@ -83,8 +88,50 @@ public class BusinessFiles {
     }
 
     public Source source(BigInteger fileId) {
-        var record = requireFile(fileId);
+        return source(requireFile(fileId));
+    }
+
+    /** Lock a file until the caller has committed the business record that references it. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Source lockSource(BigInteger fileId) {
+        var record = files.lock(fileId);
+        if (record == null || record.purgeRequestedAt() != null) {
+            throw new ApiError(40404, "文件不存在");
+        }
+        return source(record);
+    }
+
+    private Source source(FileMapper.StoredFile record) {
         return new Source(record.storageBucket(), record.objectKey(), record.originalName(), record.mimeType());
+    }
+
+    /** Reserve an unreferenced owned file for deletion in the caller's transaction. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean retire(BigInteger owner, BigInteger id) {
+        var file = files.lock(id);
+        return file != null && owner.equals(file.uploaderId()) && files.retire(owner, id) == 1;
+    }
+
+    /** Try removal after commit, leaving a durable retirement marker on storage failure. */
+    public void purgeRetired(BigInteger id) {
+        try {
+            transactions.executeWithoutResult(ignored -> {
+                var file = files.lock(id);
+                if (file != null && file.purgeRequestedAt() != null) removeRetired(file);
+            });
+        } catch (RuntimeException error) {
+            LOGGER.warn("Could not purge retired file {}", id, error);
+        }
+    }
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+    void purgePending() {
+        files.pendingPurges().forEach(this::purgeRetired);
+    }
+
+    private void removeRetired(FileMapper.StoredFile file) {
+        storage.remove(file.storageBucket(), file.objectKey());
+        files.forgetRetired(file.id());
     }
 
     public byte[] read(Source source) {
@@ -101,26 +148,7 @@ public class BusinessFiles {
 
     private Map<String, Object> save(BigInteger owner, String name, String mime, String digest, long size,
                                      boolean checkQuota, BiConsumer<String, String> writeObject) {
-        var existing = files.findByDigest(digest);
-        if (existing != null) {
-            if (!storage.exists(existing.storageBucket(), existing.objectKey())) {
-                if ("local".equals(existing.storageBucket())) {
-                    writeObject.accept(storage.bucket(), existing.objectKey());
-                    files.markMigrated(existing.id(), storage.bucket());
-                } else {
-                    writeObject.accept(existing.storageBucket(), existing.objectKey());
-                }
-            }
-            return uploadView(existing, true);
-        }
-        if (checkQuota) {
-            var usage = files.usage(owner);
-            if (usage.bytes() + size > byteQuota || usage.files() + 1 > numberQuota) {
-                throw new ApiError(41301, "存储配额已满");
-            }
-        }
         String key = ContentKeys.key(digest);
-        writeObject.accept(storage.bucket(), key);
         var data = new HashMap<String, Object>();
         data.put("digest", digest);
         data.put("bucket", storage.bucket());
@@ -129,16 +157,35 @@ public class BusinessFiles {
         data.put("size", size);
         data.put("mime", mime);
         data.put("owner", owner);
-        try {
-            files.create(data);
-        } catch (DuplicateKeyException error) {
-            var concurrent = files.findByDigest(digest);
-            if (concurrent != null) {
-                return uploadView(concurrent, true);
+        return transactions.execute(ignored -> {
+            // Reserve the digest in MySQL before writing so a retired copy cannot delete a concurrent upload.
+            boolean fresh = files.reserve(data) == 1;
+            var file = files.lockDigest(digest);
+            if (file == null) throw new ApiError(50000, "无法保存文件");
+            if (file.purgeRequestedAt() != null) {
+                removeRetired(file);
+                files.reserve(data);
+                file = files.lockDigest(digest);
+                fresh = true;
             }
-            throw error;
-        }
-        return uploadView(requireFile(new BigInteger(data.get("id").toString())), false);
+            if (fresh) {
+                if (checkQuota) {
+                    var usage = files.usage(owner);
+                    if (usage.bytes() > byteQuota || usage.files() > numberQuota) {
+                        throw new ApiError(41301, "存储配额已满");
+                    }
+                }
+                writeObject.accept(storage.bucket(), key);
+            } else if (!storage.exists(file.storageBucket(), file.objectKey())) {
+                if ("local".equals(file.storageBucket())) {
+                    writeObject.accept(storage.bucket(), file.objectKey());
+                    files.markMigrated(file.id(), storage.bucket());
+                } else {
+                    writeObject.accept(file.storageBucket(), file.objectKey());
+                }
+            }
+            return uploadView(file, !fresh);
+        });
     }
 
     private FileMapper.StoredFile requireFile(BigInteger id) {

@@ -4,8 +4,10 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import router from './router'
-// 页面直接调用 ElMessage，按需解析器不会为这些调用加载样式。
+// 以函数调用的提示组件需要显式加载样式。
 import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
+import 'element-plus/es/components/notification/style/css'
 import './styles/main.css'
 
 const app = createApp(App)

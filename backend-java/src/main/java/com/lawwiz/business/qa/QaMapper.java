@@ -30,6 +30,12 @@ interface QaMapper {
     @Select("SELECT " + SESSIONS + " FROM qa_session WHERE id = #{id} AND deleted_at IS NULL")
     Session find(BigInteger id);
 
+    @Update("""
+            UPDATE qa_session SET review_task_id = NULL, risk_point_id = NULL,
+                updated_at = CURRENT_TIMESTAMP(3) WHERE review_task_id = #{task}
+            """)
+    void detachReview(BigInteger task);
+
     @Select("SELECT " + SESSIONS + " FROM qa_session WHERE id = #{id} AND deleted_at IS NULL FOR UPDATE")
     Session lock(BigInteger id);
 

@@ -62,12 +62,15 @@ CREATE TABLE file_object (
     mime_type VARCHAR(128),
     uploader_id BIGINT UNSIGNED,
     deleted_at DATETIME(3),
+    purge_requested_at DATETIME(3),
     created_at DATETIME(3) NOT NULL DEFAULT now(3),
     updated_at DATETIME(3) NOT NULL DEFAULT now(3),
     CONSTRAINT pk_file_object PRIMARY KEY (id),
     CONSTRAINT uk_file_object_sha256 UNIQUE (sha256),
     CONSTRAINT fk_file_object_uploader FOREIGN KEY(uploader_id) REFERENCES user (id)
 )ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+CREATE INDEX idx_file_pending_purge ON file_object (purge_requested_at, id);
 
 CREATE TABLE risk_rule_source (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -131,6 +134,7 @@ CREATE TABLE review_task (
     error_message VARCHAR(500),
     started_at DATETIME(3),
     finished_at DATETIME(3),
+    archived_at DATETIME(3),
     deleted_at DATETIME(3),
     created_at DATETIME(3) NOT NULL DEFAULT now(3),
     updated_at DATETIME(3) NOT NULL DEFAULT now(3),
@@ -141,6 +145,7 @@ CREATE TABLE review_task (
 )ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE INDEX idx_review_task_user_status ON review_task (user_id, status, created_at);
+CREATE INDEX idx_review_task_user_archive ON review_task (user_id, archived_at, created_at);
 
 CREATE TABLE qa_session (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -4,9 +4,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /** Starts the Java business API. */
 @SpringBootApplication
+@EnableScheduling
 public class BusinessApplication {
     public static void main(String[] args) {
         if (java.util.Arrays.stream(args).anyMatch(arg -> arg.startsWith("--lawwiz.file-migration="))) {
