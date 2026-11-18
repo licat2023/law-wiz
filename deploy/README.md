@@ -28,6 +28,8 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --wait
 
 已有开发卷时复用数据并直接执行全栈启动命令。开发 Compose 默认使用模型替身和开发嵌入。连接真实服务时，在 `.env.dev` 中设置 `LAWWIZ_ALLOW_FAKE_MODEL=false`、`KB_EMBEDDING_MODE=remote` 并填写相应配置。自定义知识库数据库口令包含 URL 特殊字符时，请提供密码经过 URL 编码的 `KB_DATABASE_URL`。
 
+如果本机 `.env` 已保存真实嵌入配置，可在开发命令中按顺序指定 `--env-file .env --env-file .env.dev`。后一个文件中的同名配置会覆盖前一个文件，可从 `.env.dev` 去掉重复的 `KB_EMBEDDING_*` 项。`LAWWIZ_ALLOW_FAKE_MODEL=true` 可以和远程嵌入同时使用，便于在无生成模型凭据时验证检索与引用。
+
 开发容器运行 Vite。修改页面源码前，可在另一个终端运行以下命令，让 Compose Watch 同步两个 `src/` 目录并触发热更新。依赖、配置或后端源码修改后，用 `up -d --build --wait` 重建。
 
 ```bash

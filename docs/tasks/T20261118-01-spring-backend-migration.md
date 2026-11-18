@@ -6,6 +6,7 @@
 - R2，本次聊天，用户设置执行目标“拆AI并将后端转为SpringBoot+Mybatis+Redsi+RustFS”。采用此前对话中的 AI 拆分、Java 接管、RustFS 切换和本地回退演练顺序。
 - R3，本次聊天，用户对遗留改动的处理选择“进行提交然后在当前工作区开展工作”。已在现有分支分别提交文档纠正、编辑器配置、历史 AI 方案和架构调研。迁移以其后的干净 HEAD `f06f890` 为基线。
 - R4，本次聊天，用户要求“继续完成上一轮因 usage limit 中断的任务。先检查当前工作区状态，避免重复执行已经完成的修改或命令，然后从未完成步骤继续。保留原有任务范围，不要停下来等人确认。”继续使用当前工作区，并按最新 Docker 文件交换约定验收。
+- R5，本次聊天，用户说明“嵌入模型不是.env提供的有，而且这个项目不上生产，目前也是开发阶段，所以直接弄随便弄”。补充联调以本机开发环境为范围，复用已有嵌入配置。
 
 ## 当前任务理解
 
@@ -33,7 +34,7 @@
 | `backend-java/src/{main,test}/java/com/lawwiz/business/files/` | 文件内容识别、流式上传、去重、权限校验与 RustFS 对象读写 | 新增 | 已完成 | 实际 RustFS 两份 19 MiB 并发上传、去重及读回哈希验证通过 |
 | `backend-java/src/{main,test}/java/com/lawwiz/business/review/`、`backend-java/{pom.xml,Dockerfile}` | 审查任务、正文提取、生成中文 PDF 和保存报告 | 新增及修改 | 已完成 | DOCX 顺序、长文审查、中文 PDF、风险及模型故障回填通过 |
 | `backend-java/src/main/java/com/lawwiz/business/knowledge/` | 转发已有知识库兼容 API，保持读写权限与响应字段 | 新增 | 已完成 | 独立知识库授权写入、索引、读回、检索和拒绝无权写入通过 |
-| `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 已完成 | 开发栈就绪，生产编排用隔离模型和嵌入端点接通 |
+| `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 已完成 | 开发栈通过实际嵌入与问答引用验证，生产编排曾用测试端点验证 |
 | `backend-java/src/main/java/com/lawwiz/business/files/FileMigration.java`、`deploy/mysql-init/{Dockerfile,10-business-schema.sql}` | 历史对象复制、哈希校验、回退和以镜像初始化空库 | 新增 | 已完成 | 空业务库 13 张表，缺件拒绝、重复复制及两版下载对照通过 |
 | `knowledge_base/backend/Dockerfile` | 将已有索引升级脚本随镜像交付 | 修改 | 已完成 | 从容器输出关键词表升级 DDL |
 | `AGENTS.md`、`README.md`、`backend/README.md`、`knowledge_base/README.md`、`docs/{FILE_MAP.md,02-技术栈.md,03-概要设计.md,04-数据库设计.md,05-接口设计.md,06-MVP演示指南.md}`、`law-wiz.code-workspace` | 技术与部署入口、路径、文件定位、备份和接口说明 | 修改 | 已完成 | 按最终目录、初始化行为与回退命令核对 |
@@ -49,4 +50,4 @@
 - Java 审查读取 RustFS 合同并生成中文 PDF。实际 MySQL 验证风险规则、报告计数和误报标记。系统存下 24 万字符合同正文，在 AI 输入上限内成功生成审查结果。知识库兼容入口实测授权写入、索引、分块及检索，未授权写入返回 40301。
 - 从 Git 暂存树导出干净源码构建。开发和隔离生产编排均启动，两个站点代理通过，前端生产构建和两套 ESLint、5 项 Java 回归通过。OpenAPI 对照 20 个路径共 25 个 HTTP 操作，路径参数名称按占位符核对。开发文档可打开，生产文档和固定验证码均关闭。健康检查的 `runtime` 提供 `java_version` 和启动时间，Java OpenAPI 中的响应 `data` 为通用类型。开发使用模型替身，生产编排连接本地协议替身，验证实际 HTTP 交互和模型 503 经服务转换后持久化为 `failed`/`50301`。
 - 隔离已有库共校验 13 个对象，覆盖旧卷与 RustFS 混合数据、缺件拒绝、复制重试和全部回退。缺件时数据库定位保持不变。生产编排按文档回退 3 个对象后，旧版 Python 登录并下载 Java 新生成的 PDF，字节与回退前相同。复制回 RustFS 后，Java 再次下载得到相同文件。
-- 验收环境使用脱敏数据和本地替身。实际生产切换、真实生成与嵌入供应商、目标主机并发资源容量留待上线时验证。
+- 按 R5 启动本机 `lawwiz-dev`，由 `.env` 提供已有嵌入设置，由 Git 忽略的 `.env.dev` 提供本地账号及服务授权。实际服务返回 4096 维向量。两个标注为开发样本的文档成功索引，纯向量检索把交付验收样本排在首位。业务站点的问答通过独立 AI 服务检索并保存预期引文。两个前端均可访问，八个容器健康。生成模型配置缺少密钥，继续使用开发替身。本轮范围为本机开发联调。
