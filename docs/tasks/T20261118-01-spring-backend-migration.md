@@ -28,7 +28,7 @@
 | --- | --- | --- | --- | --- |
 | `ai-service/{ai_service/,tests/,pyproject.toml,uv.lock,Dockerfile,.dockerignore,README.md}` | 独立运行两个 Agent、检索并接入模型 | 新增及移动 | 已完成 | 4 项独立回归及 Docker 调用通过 |
 | `backend/app/{core/agent.py,core/citations.py,domains/contract_review/,domains/legal_qa/,infrastructure/{ai_service,knowledge_base,llm}.py,api/health.py,config.py,lifespan.py}`、`backend/{tests/,pyproject.toml,uv.lock,.env.example,README.md}` | 过渡业务流程通过 HTTP 调用 AI，保留权限、状态和数据 | 修改及移动 | 已完成 | 5 项回归和开发容器端到端通过 |
-| `backend-java/` | Spring Boot、MyBatis、Redis、业务 HTTP、文档处理与对象存储 | 新增 | 待施工 | API 对照、实际 MySQL 与 Redis、文件样本与故障 |
+| `backend-java/{pom.xml,Dockerfile,.dockerignore,.gitignore,README.md,src/main/java/,src/main/resources/,src/test/java/}` | Spring Boot、MyBatis、Redis、业务 HTTP、文档处理与对象存储 | 新增 | 施工中 | API 对照、实际 MySQL 与 Redis、文件样本与故障 |
 | `deploy/{docker-compose.dev.yml,docker-compose.prod.yml,.env.dev.example,.env.example,README.md}` | 服务编排、配置与启动 | 修改 | 施工中 | 空库与既有库、健康检查和容器预算 |
 | `deploy/` 迁移工具 | 旧文件清单、复制、哈希验证和切换回退 | 新增，路径待定 | 待施工 | 幂等迁移、缺失或损坏检测、回退可读取新增文件 |
 | `AGENTS.md`、`README.md`、`docs/{FILE_MAP.md,02-技术栈.md,03-概要设计.md,05-接口设计.md,06-MVP演示指南.md}`、`law-wiz.code-workspace` | 技术与部署入口、路径和接口说明 | 修改 | 待施工 | 对照最终目录和运行行为 |
@@ -39,3 +39,4 @@
 - 当前分支无合并、变基或暂存遗留。业务报告追问的 5 项基线测试通过，知识库现有 Ruff 检查通过。
 - 本机 Docker 可用，已有 MySQL 9.7、Redis、Java 21 Maven 构建镜像及 RustFS 1.0.5 镜像。端到端、真实模型和主机并发内存仍待验证。
 - AI 拆分阶段从暂存树导出干净源码。两个 Python 环境的 Ruff 检查、格式检查和共 9 项回归通过。隔离开发 Compose 构建并启动业务后端、独立 AI 服务及真实 MySQL、Redis、知识库，验证合同上传、审查成功、可下载 PDF、普通问答与报告追问。使用开发模型和空检索样本核对无依据行为，容器日志确认两类请求实际经过内部 HTTP。保留导出的 OpenAPI 及 13 表 MySQL DDL 用于 Java 对照。
+- Java 鉴权切片使用 Spring Boot 4.0.9、MyBatis Starter 4.0.1 和 Java 21。对同一隔离 MySQL 9.7 和 Redis，验证旧用户登录、旧 JWT 读取资料、旧刷新令牌在 Java 轮换、Python 识别 Java 新 JWT 和新密码哈希。重复邮箱返回 40902，资料更新和注销后旧刷新令牌失效通过。下一阶段迁普通问答和报告追问。

@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: law-wiz-business
+  datasource:
+    url: "${LAWWIZ_JDBC_URL:jdbc:mysql://127.0.0.1:3306/law_wiz?connectionTimeZone=Asia/Shanghai}"
+    username: "${LAWWIZ_DB_USER:lawwiz}"
+    password: "${LAWWIZ_DB_PASSWORD:changeme}"
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 5000
+      connection-init-sql: "SET time_zone = '+08:00'"
+  data:
+    redis:
+      url: "${LAWWIZ_REDIS_URL:redis://127.0.0.1:6379/0}"
+      timeout: 3s
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    arg-name-based-constructor-auto-mapping: true
+server:
+  port: "${LAWWIZ_SERVER_PORT:8000}"
+  shutdown: graceful
+  tomcat:
+    threads:
+      min-spare: 2
+      max: 24
+    max-swallow-size: 21MB
+lawwiz:
+  environment: "${LAWWIZ_APP_ENV:development}"
+  jwt-secret: "${LAWWIZ_JWT_SECRET:dev-only-insecure-secret-change-me}"
+  redis-prefix: "${LAWWIZ_REDIS_KEY_PREFIX:lawwiz:}"
+  fixed-code: "${LAWWIZ_ALLOW_FIXED_VERIFY_CODE:true}"

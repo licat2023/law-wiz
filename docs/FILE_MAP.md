@@ -14,6 +14,7 @@
 | `backend/app/infrastructure/` | 数据库、存储、缓存、AI 服务与知识库连接 |
 | `ai-service/ai_service/` | AI 服务入口、模型接入、法条引用检索、审查及问答工作流 |
 | `ai-service/tests/` | 内部推理接口与引用行为验证 |
+| `backend-java/` | 迁移中的 Spring Boot 业务实现及 Java 构建入口 |
 | `knowledge_base/backend/app/knowledge_bases/` | 库设置与访问范围 |
 | `knowledge_base/backend/app/documents/` | 文档、原文件、修订、解析与导入 |
 | `knowledge_base/backend/app/indexing/` | 切分、嵌入、关键词倒排、处理任务与索引发布 |
