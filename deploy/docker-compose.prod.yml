@@ -61,10 +61,9 @@ services:
       LAWWIZ_DB_PASSWORD: ${LAWWIZ_DB_PASSWORD:?必须设置业务数据库密码}
       LAWWIZ_REDIS_URL: redis://redis:6379/0
       LAWWIZ_JWT_SECRET: ${LAWWIZ_JWT_SECRET:?必须设置业务JWT密钥}
-      LAWWIZ_MODEL_API_KEY: ${LAWWIZ_MODEL_API_KEY:?必须配置真实模型密钥}
-      LAWWIZ_MODEL_BASE_URL: ${LAWWIZ_MODEL_BASE_URL:?必须配置真实模型地址}
-      LAWWIZ_MODEL_NAME: ${LAWWIZ_MODEL_NAME:?必须配置真实模型名称}
-      LAWWIZ_MODEL_TIMEOUT_SECONDS: ${LAWWIZ_MODEL_TIMEOUT_SECONDS:-60}
+      LAWWIZ_AI_SERVICE_BASE_URL: http://ai-service:8200
+      LAWWIZ_AI_SERVICE_TOKEN: ${LAWWIZ_AI_SERVICE_TOKEN:?必须设置独立 AI 服务令牌}
+      LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS: ${LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS:-65}
       LAWWIZ_STORAGE_BACKEND: local
       LAWWIZ_STORAGE_LOCAL_ROOT: /app/.data
       LAWWIZ_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
@@ -85,8 +84,29 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
-    mem_limit: 640m
-    networks: [data, knowledge, business-web]
+    mem_limit: 384m
+    networks: [data, knowledge, business-web, inference]
+
+  ai-service:
+    build: {context: ../ai-service, dockerfile: Dockerfile}
+    restart: unless-stopped
+    environment:
+      AI_ENVIRONMENT: production
+      AI_SERVICE_TOKEN: ${LAWWIZ_AI_SERVICE_TOKEN:?必须设置独立 AI 服务令牌}
+      AI_MODEL_API_KEY: ${LAWWIZ_MODEL_API_KEY:?必须配置真实模型密钥}
+      AI_MODEL_BASE_URL: ${LAWWIZ_MODEL_BASE_URL:?必须配置真实模型地址}
+      AI_MODEL_NAME: ${LAWWIZ_MODEL_NAME:?必须配置真实模型名称}
+      AI_MODEL_TIMEOUT_SECONDS: ${LAWWIZ_MODEL_TIMEOUT_SECONDS:-60}
+      AI_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
+      AI_KNOWLEDGE_BASE_SERVICE_KEY: ${LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY:?必须设置知识库只读凭证}
+      AI_KNOWLEDGE_BASE_DEFAULT_ID: ${LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID:?必须设置默认知识库ID}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/internal/health', timeout=3)"]
+      interval: 15s
+      timeout: 4s
+      retries: 10
+    mem_limit: 256m
+    networks: [inference, knowledge]
 
   knowledge-base:
     build: {context: ../knowledge_base/backend, dockerfile: Dockerfile}
@@ -165,6 +185,7 @@ volumes:
   lawwiz-kb-data:
 
 networks:
+  inference:
   data:
   knowledge:
   business-web:

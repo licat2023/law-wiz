@@ -1,0 +1,25 @@
+[project]
+name = "law-wiz-ai-service"
+version = "0.1.0"
+description = "Contract review and legal QA inference service"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "langgraph>=0.2",
+    "pydantic-settings>=2.6",
+    "uvicorn[standard]>=0.34",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.8"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501", "B008", "RUF001", "RUF002", "RUF003"]

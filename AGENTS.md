@@ -3,7 +3,7 @@
 面向在本仓库工作的 AI 代理与协作者的约定。**只写对未来任务有用的信息**：
 操作历史、已关闭的 Issue 编号、临时绕过手段属于 commit message，不属于本文件。
 
-业务 FastAPI 运行合同审查与法律问答 Agent。知识库独立运行，持有文档、索引和 Chroma。两个后端各用自己的数据库和 Python 环境。
+业务 FastAPI 负责用户、文件、审查和问答状态。独立 AI 服务运行两个 Agent，通过只读凭据访问知识库。知识库独立持有文档、索引和 Chroma。
 
 开始、恢复或接手需要施工记录的工作前，先读 [任务总索引](docs/tasks/README.md)。已有对应任务时再读主文档，核对有效需求、当前理解、状态、负责人、依赖和已有改动。文件范围、施工进度和验证记录维护在 [任务目录](docs/tasks/) 对应主文档中。
 
@@ -14,6 +14,7 @@
 | 目录 | 职责 |
 | --- | --- |
 | `backend/` | 业务 FastAPI，`app/domains/` 按领域组织 |
+| `ai-service/` | 独立推理服务，运行合同审查与法律问答 Agent |
 | `frontend/` | 智法宝用户界面 |
 | `knowledge_base/backend/` | 知识库 FastAPI、文档入库、索引和检索 |
 | `knowledge_base/frontend/` | 知识库管理界面 |
@@ -21,7 +22,7 @@
 | `docs/` | 设计、接口、架构决策和任务记录 |
 | `tools/` | 语料和文档辅助工具 |
 
-`contracts/` 管合同版本和正文，`contract_review/` 管审查任务、规则和报告。两个 Agent 各自归审查或问答领域。新增业务 ORM 模型须登记到 `app/infrastructure/database/models.py`。知识库模型登记在 `app/infrastructure/models.py`。
+`contracts/` 管合同版本和正文，`contract_review/` 管审查任务、规则和报告。业务后端通过内部 HTTP 发送结构化输入并持久化结果。新增业务 ORM 模型须登记到 `app/infrastructure/database/models.py`。知识库模型登记在 `app/infrastructure/models.py`。
 
 业务后端通过统一 HTTP 客户端访问知识库。知识库解析入库文件、切分并发布索引，业务后端本地提取审查合同的正文。知识库生产嵌入使用远程服务，内嵌 Chroma 由单 worker 持有。
 

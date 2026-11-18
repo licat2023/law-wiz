@@ -76,7 +76,8 @@
 
 ```text
 law-wiz/
-├── backend/          # 业务 FastAPI，包含合同审查和法律问答 Agent
+├── backend/          # 业务 FastAPI，负责鉴权、文件、任务与会话
+├── ai-service/       # 独立运行合同审查和法律问答 Agent
 ├── frontend/         # 智法宝用户端
 ├── knowledge_base/
 │   ├── backend/      # 文档入库、索引、检索及独立 FastAPI
@@ -86,11 +87,11 @@ law-wiz/
 └── tools/            # 文档和架构图工具
 ```
 
-业务后端按用户、文件、合同、合同审查和法律问答组织。合同版本保存解析后的正文，审查任务和报告独立保存。两个 Agent 在业务后端进程中执行，通过 HTTP 检索独立知识库。知识库管理文档来源、修订、切分、嵌入和 Chroma 索引。
+业务后端按用户、文件、合同、合同审查和法律问答组织。合同版本保存解析后的正文，审查任务和报告独立保存。业务后端通过内部 HTTP 请求 AI 服务运行两个 Agent。AI 服务通过只读凭据检索知识库，知识库管理文档来源、修订、切分、嵌入和 Chroma 索引。
 
 ## 本地运行
 
-按 [部署说明](deploy/README.md) 启动 MySQL、Redis 和两个后端。使用 [知识库管理后台](knowledge_base/README.md) 创建库并上传 Demo 语料，再设置业务后端的默认知识库与只读凭证。模型和嵌入可分别启用开发替身。
+按 [部署说明](deploy/README.md) 启动应用。使用 [知识库管理后台](knowledge_base/README.md) 创建库并上传 Demo 语料，再为业务后端和 AI 服务设置默认知识库与只读凭证。模型和嵌入可分别启用开发替身。
 
 业务后端启动和检查命令见 [后端说明](backend/README.md)，演示链路见 [Demo 指南](docs/06-MVP演示指南.md)。
 

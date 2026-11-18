@@ -1,6 +1,6 @@
 # 部署说明
 
-开发和生产均通过 Docker Compose 运行六个服务：业务前端、业务后端、知识库管理前端、知识库后端、MySQL 和 Redis。两个站点分别代理同源 `/api`。模型由业务后端调用，嵌入由知识库调用。
+开发和生产通过 Docker Compose 运行两个站点、两个应用后端、AI 服务、MySQL 和 Redis。两个站点分别代理同源 `/api`。AI 服务调用生成模型并检索法条，知识库调用嵌入服务。
 
 ## 本地 Demo
 
@@ -37,7 +37,7 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml watch --no-up
 
 ## Compose 部署
 
-在 `deploy/` 复制 `.env.example` 并填写各项凭据。`LAWWIZ_MODEL_*` 供业务后端调用模型，`KB_EMBEDDING_*` 供知识库调用真实嵌入。两个数据库使用各自的账号与凭据。业务 reader 与可选 writer 分开授权，writer 入口还要求业务管理员白名单。
+在 `deploy/` 复制 `.env.example` 并填写各项凭据。`LAWWIZ_MODEL_*` 注入 AI 服务，`KB_EMBEDDING_*` 供知识库调用真实嵌入。`LAWWIZ_AI_SERVICE_TOKEN` 用于内部调用，生产至少 32 字符。两个数据库分别使用各自的凭据。AI 服务只接收知识库 reader 凭据，业务 writer 入口还要求管理员白名单。
 
 首次部署可先启动知识库，再由管理员创建默认库。首次为知识库建表时可用空的服务凭证映射 `{}`。有实际库 ID 后设置默认库 ID 和 reader 映射，再启用业务后端。Compose 在解析完整配置时会校验必填变量，先填齐 `.env.example` 的必填项；只启动知识库时可临时给默认库 ID 填待初始化值。
 
@@ -86,9 +86,10 @@ OpenResty 的站点代理须传递原始 `Host`，用 `$remote_addr` 设置 `X-F
 | --- | --- |
 | MySQL | 384 MiB |
 | Redis | 96 MiB |
-| 业务后端（含 Agent） | 640 MiB |
+| 业务后端 | 384 MiB |
+| AI 服务 | 256 MiB |
 | 知识库（单 worker） | 512 MiB |
 | 业务前端 | 32 MiB |
 | 知识库管理前端 | 32 MiB |
 
-业务后端的配置上限沿用原业务与 AI 容器上限之和。部署到共享主机前，以真实语料、模型和并发请求核对实际内存占用。
+业务后端和 AI 服务沿用拆分前的合计预算。部署到共享主机前，以真实语料、模型和并发请求核对实际内存占用。

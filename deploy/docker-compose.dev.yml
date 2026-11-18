@@ -71,11 +71,9 @@ services:
       LAWWIZ_DB_PASSWORD: ${LAWWIZ_DB_PASSWORD:-changeme}
       LAWWIZ_REDIS_URL: redis://redis:6379/0
       LAWWIZ_JWT_SECRET:
-      LAWWIZ_ALLOW_FAKE_MODEL: ${LAWWIZ_ALLOW_FAKE_MODEL:-true}
-      LAWWIZ_MODEL_API_KEY: ${LAWWIZ_MODEL_API_KEY:-}
-      LAWWIZ_MODEL_BASE_URL: ${LAWWIZ_MODEL_BASE_URL:-}
-      LAWWIZ_MODEL_NAME: ${LAWWIZ_MODEL_NAME:-}
-      LAWWIZ_MODEL_TIMEOUT_SECONDS: ${LAWWIZ_MODEL_TIMEOUT_SECONDS:-60}
+      LAWWIZ_AI_SERVICE_BASE_URL: http://ai-service:8200
+      LAWWIZ_AI_SERVICE_TOKEN: ${LAWWIZ_AI_SERVICE_TOKEN:-development-ai-token}
+      LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS: ${LAWWIZ_AI_SERVICE_TIMEOUT_SECONDS:-65}
       LAWWIZ_STORAGE_LOCAL_ROOT: /app/.data
       LAWWIZ_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
       LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY: ${LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY:-}
@@ -93,7 +91,27 @@ services:
       interval: 5s
       timeout: 6s
       retries: 20
-    mem_limit: 640m
+    mem_limit: 384m
+
+  ai-service:
+    build: {context: ../ai-service, dockerfile: Dockerfile}
+    environment:
+      AI_ENVIRONMENT: development
+      AI_SERVICE_TOKEN: ${LAWWIZ_AI_SERVICE_TOKEN:-development-ai-token}
+      AI_ALLOW_FAKE_MODEL: ${LAWWIZ_ALLOW_FAKE_MODEL:-true}
+      AI_MODEL_API_KEY: ${LAWWIZ_MODEL_API_KEY:-}
+      AI_MODEL_BASE_URL: ${LAWWIZ_MODEL_BASE_URL:-}
+      AI_MODEL_NAME: ${LAWWIZ_MODEL_NAME:-}
+      AI_MODEL_TIMEOUT_SECONDS: ${LAWWIZ_MODEL_TIMEOUT_SECONDS:-60}
+      AI_KNOWLEDGE_BASE_BASE_URL: http://knowledge-base:8100
+      AI_KNOWLEDGE_BASE_SERVICE_KEY: ${LAWWIZ_KNOWLEDGE_BASE_SERVICE_KEY:-}
+      AI_KNOWLEDGE_BASE_DEFAULT_ID: ${LAWWIZ_KNOWLEDGE_BASE_DEFAULT_ID:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/internal/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    mem_limit: 256m
 
   knowledge-base:
     build: {context: ../knowledge_base/backend, dockerfile: Dockerfile}
