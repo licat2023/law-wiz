@@ -22,7 +22,7 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
     </button>
     <template v-else>
       <button
-        class="review-row-action"
+        class="review-row-action review-row-action--restore"
         type="button"
         title="还原"
         aria-label="还原"
@@ -78,6 +78,11 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
   cursor: pointer;
   font-size: 17px;
 }
+.review-action-row .review-row-action--restore {
+  --review-action-color: var(--el-color-success-dark-2);
+  --review-action-background: var(--el-color-success-light-9);
+  color: var(--review-action-color);
+}
 .review-action-row:hover .review-row-action,
 .review-action-row:has(:focus-visible) .review-row-action {
   pointer-events: auto;
@@ -88,8 +93,8 @@ const emit = defineEmits<{ archive: []; restore: []; delete: [] }>()
 }
 .review-action-row .review-row-action:hover:not(:disabled),
 .review-action-row .review-row-action:focus-visible {
-  color: var(--el-color-danger-dark-2);
-  background: var(--el-color-danger-light-9);
+  color: var(--review-action-color, var(--el-color-danger-dark-2));
+  background: var(--review-action-background, var(--el-color-danger-light-9));
 }
 .review-action-row .review-row-action:focus-visible {
   outline: 2px solid currentColor;
